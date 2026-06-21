@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Banco Imobiliario{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <section class="saldo-card">
+        <h2>Seu Saldo</h2>
+        <div class="saldo-valor">
+            R$ {{ "%.2f"|format(usuario['saldo']) }}
+        </div>
+        <p class="saldo-usuario">{{ usuario['nome'] }}</p>
+    </section>
+
+    <section class="acoes-rapidas">
+        <a href="{{ url_for('transferir') }}" class="btn btn-primary btn-large">
+            Transferir dinheiro
+        </a>
+    </section>
+
+    <section class="historico">
+        <h3>Historico de Transacoes</h3>
+
+        {% if transacoes %}
+            <div class="transacoes-list">
+                {% for t in transacoes %}
+                    <div class="transacao-item {% if t['origem'] == usuario['nome'] %}saida{% else %}entrada{% endif %}">
+                        <div class="transacao-info">
+                            <div class="transacao-titulo">
+                                {% if t['origem'] == usuario['nome'] %}
+                                    <span class="seta">-&gt;</span>
+                                    <strong>Para:</strong>
+                                    {{ 'Banco' if t['destino'] == banco_nome else t['destino'] }}
+                                {% else %}
+                                    <span class="seta">&lt;-</span>
+                                    <strong>De:</strong>
+                                    {{ 'Banco' if t['origem'] == banco_nome else t['origem'] }}
+                                {% endif %}
+                            </div>
+                            {% if t['descricao'] %}
+                                <p class="transacao-descricao">{{ t['descricao'] }}</p>
+                            {% endif %}
+                            <small class="transacao-data">
+                                {{ t['data_hora'] }}
+                            </small>
+                        </div>
+                        <div class="transacao-valor {% if t['origem'] == usuario['nome'] %}negativo{% else %}positivo{% endif %}">
+                            {% if t['origem'] == usuario['nome'] %}
+                                -R$ {{ "%.2f"|format(t['valor']) }}
+                            {% else %}
+                                +R$ {{ "%.2f"|format(t['valor']) }}
+                            {% endif %}
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="vazio">
+                <p>Nenhuma transacao realizada ainda.</p>
+            </div>
+        {% endif %}
+    </section>
+</div>
+{% endblock %}

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}Banco da Partida - Banco Imobiliario{% endblock %}
+
+{% block content %}
+<div class="admin-login">
+    <section class="admin-login-panel">
+        <div>
+            <p class="eyebrow">Administracao</p>
+            <h2>Banco da partida</h2>
+            <p class="muted">Entre com o PIN para gerenciar jogadores, saldos e historico global.</p>
+        </div>
+
+        <form method="POST" class="admin-pin-form">
+            <div class="form-group">
+                <label for="pin">PIN do banco</label>
+                <input
+                    type="password"
+                    id="pin"
+                    name="pin"
+                    required
+                    inputmode="numeric"
+                    placeholder="Digite o PIN"
+                    autocomplete="current-password"
+                    class="form-control"
+                >
+            </div>
+            <button type="submit" class="btn btn-primary btn-large">Entrar no banco</button>
+        </form>
+    </section>
+</div>
+{% endblock %}

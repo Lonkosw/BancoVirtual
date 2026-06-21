@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+
+{% block title %}Painel do Banco - Banco Imobiliario{% endblock %}
+
+{% block content %}
+<div class="admin-page">
+    <section class="admin-header">
+        <div>
+            <p class="eyebrow">Painel do banco</p>
+            <h2>Administracao da partida</h2>
+        </div>
+        <div class="admin-stats">
+            <div>
+                <span>Jogadores</span>
+                <strong>{{ jogadores|length }}</strong>
+            </div>
+            <div>
+                <span>Saldo em jogo</span>
+                <strong>R$ {{ "%.2f"|format(total_saldo) }}</strong>
+            </div>
+            <div>
+                <span>Movimentos</span>
+                <strong>{{ transacoes|length }}</strong>
+            </div>
+        </div>
+    </section>
+
+    <section class="admin-grid">
+        <div class="admin-panel start-panel">
+            <h3>Passar pelo inicio</h3>
+            <form method="POST" action="{{ url_for('admin_config_passou_inicio') }}" class="compact-form">
+                <div class="form-group">
+                    <label for="valor_passou_inicio">Valor pago ao jogador</label>
+                    <input
+                        id="valor_passou_inicio"
+                        name="valor_passou_inicio"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value="{{ '%.2f'|format(valor_passou_inicio) }}"
+                        class="form-control"
+                    >
+                </div>
+                <button class="btn btn-primary" type="submit">Salvar valor</button>
+            </form>
+        </div>
+
+        <div class="admin-panel">
+            <h3>Novo jogador</h3>
+            <form method="POST" action="{{ url_for('admin_criar_jogador') }}" class="compact-form">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="nome">Nome</label>
+                        <input id="nome" name="nome" type="text" required minlength="2" maxlength="50" class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label for="saldo_inicial">Saldo inicial</label>
+                        <input id="saldo_inicial" name="saldo_inicial" type="number" min="0" step="0.01" value="1500" class="form-control">
+                    </div>
+                </div>
+                <button class="btn btn-primary" type="submit">Criar jogador</button>
+            </form>
+        </div>
+
+        <div class="admin-panel danger-panel">
+            <h3>Resetar partida</h3>
+            <form method="POST" action="{{ url_for('admin_resetar') }}" class="compact-form">
+                <div class="form-group">
+                    <label for="confirmar">Confirmacao</label>
+                    <input id="confirmar" name="confirmar" type="text" placeholder="Digite RESETAR" class="form-control">
+                </div>
+                <button class="btn btn-danger" type="submit">Limpar jogadores e historico</button>
+            </form>
+        </div>
+    </section>
+
+    <section class="admin-panel jogadores-panel">
+        <div class="section-title">
+            <h3>Jogadores</h3>
+            <span>{{ jogadores|length }} ativos</span>
+        </div>
+
+        {% if jogadores %}
+            <div class="jogadores-list">
+                {% for jogador in jogadores %}
+                    <article class="jogador-card">
+                        <div class="jogador-main">
+                            <strong>{{ jogador['nome'] }}</strong>
+                            <span>R$ {{ "%.2f"|format(jogador['saldo']) }}</span>
+                        </div>
+
+                        <form method="POST" action="{{ url_for('admin_passou_inicio', usuario_id=jogador['id']) }}" class="passou-inicio-form">
+                            <button class="btn btn-start" type="submit">
+                                Passou pelo inicio: +R$ {{ "%.2f"|format(valor_passou_inicio) }}
+                            </button>
+                        </form>
+
+                        <form method="POST" action="{{ url_for('admin_ajustar_saldo', usuario_id=jogador['id']) }}" class="saldo-form">
+                            <select name="acao" class="form-control" aria-label="Acao de saldo">
+                                <option value="creditar">Creditar</option>
+                                <option value="debitar">Debitar</option>
+                                <option value="definir">Definir</option>
+                            </select>
+                            <input name="valor" type="number" min="0" step="0.01" placeholder="Valor" required class="form-control">
+                            <input name="descricao" type="text" maxlength="140" placeholder="Descricao" class="form-control">
+                            <button class="btn btn-primary" type="submit">Aplicar</button>
+                        </form>
+
+                        <form method="POST" action="{{ url_for('admin_excluir_jogador', usuario_id=jogador['id']) }}" class="delete-form">
+                            <button class="btn btn-ghost" type="submit">Excluir se sem historico</button>
+                        </form>
+                    </article>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="vazio">
+                <p>Nenhum jogador criado ainda.</p>
+            </div>
+        {% endif %}
+    </section>
+
+    <section class="admin-panel">
+        <div class="section-title">
+            <h3>Historico global</h3>
+            <span>Ultimos 50 movimentos</span>
+        </div>
+
+        {% if transacoes %}
+            <div class="admin-history">
+                {% for t in transacoes %}
+                    <div class="history-row">
+                        <div>
+                            <strong>
+                                {{ 'Banco' if t['origem'] == banco_nome else t['origem'] }}
+                                para
+                                {{ 'Banco' if t['destino'] == banco_nome else t['destino'] }}
+                            </strong>
+                            {% if t['descricao'] %}
+                                <p>{{ t['descricao'] }}</p>
+                            {% endif %}
+                            <small>{{ t['data_hora'] }}</small>
+                        </div>
+                        <span>R$ {{ "%.2f"|format(t['valor']) }}</span>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="vazio">
+                <p>Nenhuma movimentacao registrada ainda.</p>
+            </div>
+        {% endif %}
+    </section>
+</div>
+{% endblock %}

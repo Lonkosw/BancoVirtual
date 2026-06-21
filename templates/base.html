@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Banco Imobiliario{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <header class="navbar">
+        <div class="navbar-container">
+            <a href="{{ url_for('index') }}" class="logo">Banco Imobiliario</a>
+            <div class="nav-user">
+                <a href="{{ url_for('admin_dashboard') if session.admin_logado else url_for('admin_entrar') }}" class="nav-link">Banco</a>
+                {% if session.admin_logado %}
+                    <a href="{{ url_for('admin_sair') }}" class="btn-logout">Sair admin</a>
+                {% endif %}
+                {% if session.usuario_id %}
+                    <span class="usuario-logado">{{ session.usuario_nome }}</span>
+                    <a href="{{ url_for('sair') }}" class="btn-logout">Sair</a>
+                {% endif %}
+            </div>
+        </div>
+    </header>
+
+    <main class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for categoria, mensagem in messages %}
+                    <div class="alert alert-{{ categoria }}">
+                        <span>{{ mensagem }}</span>
+                        <button type="button" class="close-alert">&times;</button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="footer">
+        <p>&copy; 2026 Banco Imobiliario | Sistema de Transacoes</p>
+    </footer>
+
+    <script>
+        document.querySelectorAll('.close-alert').forEach(btn => {
+            btn.addEventListener('click', function() {
+                this.parentElement.style.display = 'none';
+            });
+        });
+
+        document.querySelectorAll('.alert').forEach(alert => {
+            setTimeout(() => {
+                alert.style.display = 'none';
+            }, 5000);
+        });
+    </script>
+
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block title %}Pagina nao encontrada{% endblock %}
+
+{% block content %}
+<div class="error-container">
+    <div class="error-card">
+        <h2 class="error-code">404</h2>
+        <p class="error-message">Pagina nao encontrada</p>
+        <p>O endereco acessado nao existe nesta partida.</p>
+        <a href="{{ url_for('entrada') }}" class="btn btn-primary btn-large">
+            Voltar para entrada
+        </a>
+    </div>
+</div>
+{% endblock %}

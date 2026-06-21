@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block title %}Erro no servidor{% endblock %}
+
+{% block content %}
+<div class="error-container">
+    <div class="error-card">
+        <h2 class="error-code">500</h2>
+        <p class="error-message">Erro interno do servidor</p>
+        <p>Algo deu errado ao processar a jogada.</p>
+        <a href="{{ url_for('entrada') }}" class="btn btn-primary btn-large">
+            Voltar para entrada
+        </a>
+    </div>
+</div>
+{% endblock %}

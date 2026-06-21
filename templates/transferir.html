@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Transferir - Banco Imobiliario{% endblock %}
+
+{% block content %}
+<div class="transferir-container">
+    <h2>Transferir dinheiro</h2>
+
+    <form method="POST" class="transferir-form">
+        <div class="form-group">
+            <label for="usuario_destino">Transferir para</label>
+            <select
+                id="usuario_destino"
+                name="usuario_destino"
+                required
+                class="form-control"
+            >
+                <option value="">Selecione um jogador</option>
+                {% for usuario in usuarios %}
+                    <option value="{{ usuario['nome'] }}">
+                        {{ usuario['nome'] }}
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="valor">Valor (R$)</label>
+            <input
+                type="number"
+                id="valor"
+                name="valor"
+                required
+                min="0.01"
+                step="0.01"
+                placeholder="Ex: 100.00"
+                class="form-control"
+            >
+        </div>
+
+        <div class="form-group">
+            <label for="descricao">Descricao opcional</label>
+            <input
+                type="text"
+                id="descricao"
+                name="descricao"
+                maxlength="140"
+                placeholder="Aluguel, venda de propriedade..."
+                class="form-control"
+            >
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary btn-large">
+                Confirmar transferencia
+            </button>
+            <a href="{{ url_for('dashboard') }}" class="btn btn-secondary btn-large">
+                Cancelar
+            </a>
+        </div>
+    </form>
+</div>
+{% endblock %}

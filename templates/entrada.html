@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}Entrar - Banco Imobiliario{% endblock %}
+
+{% block content %}
+<div class="entrada-container">
+    <div class="entrada-card">
+        <div class="entrada-header">
+            <h2>Entre na partida</h2>
+            <p>Digite seu nome para acessar seu saldo e transferencias.</p>
+        </div>
+
+        <form method="POST" class="entrada-form">
+            <div class="form-group">
+                <input
+                    type="text"
+                    name="nome"
+                    placeholder="Seu nome"
+                    autofocus
+                    maxlength="50"
+                    class="entrada-input"
+                >
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-large btn-play">
+                Entrar no jogo
+            </button>
+        </form>
+
+        <div class="entrada-footer">
+            <p>Novo por aqui? O banco pode criar jogadores com saldo inicial no painel administrativo.</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
