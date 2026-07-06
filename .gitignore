@@ -29,3 +29,4 @@ banco.db
 .env
 config.local.py
 tools/
+*.bak

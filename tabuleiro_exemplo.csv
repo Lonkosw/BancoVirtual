@@ -1,0 +1,7 @@
+nome,grupo,posicao,preco_compra,custo_casa,valor_hipoteca,aluguel_0,aluguel_1casa,aluguel_2casas,aluguel_3casas,aluguel_4casas,aluguel_hotel
+Leblon,azul,1,100,50,50,6,30,90,270,400,550
+Copacabana,azul,3,120,50,60,8,40,100,300,450,600
+Av Paulista,verde,6,220,150,110,18,90,250,700,875,1050
+Rua Augusta,verde,8,220,150,110,18,90,250,700,875,1050
+Interlagos,vermelho,11,260,150,130,22,110,330,800,975,1150
+Ibirapuera,amarelo,14,300,200,150,26,130,390,900,1100,1275

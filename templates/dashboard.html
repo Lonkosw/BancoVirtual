@@ -1,10 +1,11 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard - Banco Imobiliario{% endblock %}
+{% block title %}Painel - O Capital{% endblock %}
 
 {% block content %}
 <div class="dashboard">
-    <section class="saldo-card">
+    <section class="saldo-card {% if usuario['falido'] %}falido{% endif %}">
+        {% if usuario['falido'] %}<div class="selo-falido">Falido</div>{% endif %}
         <h2>Seu Saldo</h2>
         <div class="saldo-valor">
             R$ {{ "%.2f"|format(usuario['saldo']) }}
@@ -18,47 +19,270 @@
         </a>
     </section>
 
-    <section class="historico">
-        <h3>Historico de Transacoes</h3>
+    <div class="jogador-tabs" data-tabs>
+        <nav class="tab-nav">
+            <button type="button" class="tab-btn active" data-pane="j-cartas">
+                Cartas{% if minhas_cartas %} <span class="tab-cnt">{{ minhas_cartas|length }}</span>{% endif %}
+            </button>
+            <button type="button" class="tab-btn" data-pane="j-props">Propriedades</button>
+            <button type="button" class="tab-btn" data-pane="j-hist">Historico</button>
+        </nav>
 
-        {% if transacoes %}
-            <div class="transacoes-list">
-                {% for t in transacoes %}
-                    <div class="transacao-item {% if t['origem'] == usuario['nome'] %}saida{% else %}entrada{% endif %}">
-                        <div class="transacao-info">
-                            <div class="transacao-titulo">
-                                {% if t['origem'] == usuario['nome'] %}
-                                    <span class="seta">-&gt;</span>
-                                    <strong>Para:</strong>
-                                    {{ 'Banco' if t['destino'] == banco_nome else t['destino'] }}
-                                {% else %}
-                                    <span class="seta">&lt;-</span>
-                                    <strong>De:</strong>
-                                    {{ 'Banco' if t['origem'] == banco_nome else t['origem'] }}
-                                {% endif %}
-                            </div>
-                            {% if t['descricao'] %}
-                                <p class="transacao-descricao">{{ t['descricao'] }}</p>
-                            {% endif %}
-                            <small class="transacao-data">
-                                {{ t['data_hora'] }}
-                            </small>
-                        </div>
-                        <div class="transacao-valor {% if t['origem'] == usuario['nome'] %}negativo{% else %}positivo{% endif %}">
-                            {% if t['origem'] == usuario['nome'] %}
-                                -R$ {{ "%.2f"|format(t['valor']) }}
-                            {% else %}
-                                +R$ {{ "%.2f"|format(t['valor']) }}
-                            {% endif %}
+        <!-- ABA: CARTAS -->
+        <div class="tab-pane show" id="j-cartas"
+             data-cartas-api="{{ url_for('api_minhas_cartas') }}"
+             data-usuario="{{ usuario['id'] }}">
+            <div class="cartas-inventario">
+                {% if minhas_protecoes %}
+                    <div class="inv-bloco">
+                        <h4 class="cartas-sub">Minhas protecoes</h4>
+                        <div class="inv-list">
+                            {% for p in minhas_protecoes %}
+                                <div class="protecao-item classe-{{ p['classe'] }}">
+                                    <div class="protecao-info">
+                                        <strong>{{ p['titulo'] }}</strong>
+                                        <small>{{ p['texto'] }}</small>
+                                    </div>
+                                    <form method="POST" action="{{ url_for('usar_protecao', tirada_id=p['id']) }}"
+                                          onsubmit="return confirm('Usar sua carta de protecao? Ela sera consumida.');">
+                                        <button class="btn btn-primary" type="submit">Usar</button>
+                                    </form>
+                                </div>
+                            {% endfor %}
                         </div>
                     </div>
-                {% endfor %}
+                {% endif %}
             </div>
-        {% else %}
-            <div class="vazio">
-                <p>Nenhuma transacao realizada ainda.</p>
+            <div class="cartas-conteudo" data-newest="{{ minhas_cartas[0]['id'] if minhas_cartas else 0 }}">
+                {% if minhas_cartas %}
+                    {% set ultima = minhas_cartas[0] %}
+                    <article class="carta-destaque classe-{{ ultima['classe'] }}" data-carta-id="{{ ultima['id'] }}">
+                        <div class="carta-selo">{{ rotulo_classe[ultima['classe']] }}</div>
+                        <span class="carta-nova">NOVA</span>
+                        <span class="carta-estrela">&#9733;</span>
+                        <h3>{{ ultima['titulo'] }}</h3>
+                        <p class="carta-texto">{{ ultima['texto'] }}</p>
+                        {% if ultima['aplicada'] and ultima['valor_aplicado'] is not none %}
+                            <div class="carta-valor">
+                                {% if ultima['valor_aplicado'] >= 0 %}
+                                    +R$ {{ "%.2f"|format(ultima['valor_aplicado']) }}
+                                {% else %}
+                                    -R$ {{ "%.2f"|format(-ultima['valor_aplicado']) }}
+                                {% endif %}
+                            </div>
+                        {% endif %}
+                    </article>
+
+                    {% if minhas_cartas|length > 1 %}
+                        <h4 class="cartas-sub">Cartas anteriores</h4>
+                        <div class="cartas-hist">
+                            {% for c in minhas_cartas[1:] %}
+                                <div class="carta-mini classe-{{ c['classe'] }}">
+                                    <div class="carta-mini-topo">
+                                        <span class="carta-classe">{{ rotulo_classe[c['classe']] }}</span>
+                                    </div>
+                                    <h4>{{ c['titulo'] }}</h4>
+                                    <p>{{ c['texto'] }}</p>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                {% else %}
+                    <div class="vazio">
+                        <p>Voce ainda nao tirou nenhuma carta.</p>
+                    </div>
+                {% endif %}
             </div>
-        {% endif %}
-    </section>
+        </div>
+
+        <!-- ABA: PROPRIEDADES -->
+        <div class="tab-pane" id="j-props">
+            {% if minhas_propriedades %}
+                <div class="mp-list">
+                    {% for p in minhas_propriedades %}
+                        <div class="mp-item {% if p['hipotecada'] %}hipotecada{% endif %}">
+                            <span class="mp-cor" style="background: {{ p['grupo'] or '#888' }}"></span>
+                            <div class="mp-info">
+                                <strong>{{ p['nome'] }}</strong>
+                                <small>{{ p['nivel_texto'] }}{% if p['hipotecada'] %} - hipotecada{% endif %}</small>
+                            </div>
+                            <div class="mp-aluguel">
+                                Aluguel: <strong>R$ {{ "%.2f"|format(p['aluguel_atual']) }}</strong>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="vazio">
+                    <p>Voce ainda nao possui propriedades.</p>
+                </div>
+            {% endif %}
+        </div>
+
+        <!-- ABA: HISTORICO -->
+        <div class="tab-pane" id="j-hist">
+            {% if transacoes %}
+                <div class="transacoes-list">
+                    {% for t in transacoes %}
+                        <div class="transacao-item {% if t['origem'] == usuario['nome'] %}saida{% else %}entrada{% endif %}">
+                            <div class="transacao-info">
+                                <div class="transacao-titulo">
+                                    {% if t['origem'] == usuario['nome'] %}
+                                        <span class="seta">&#8593;</span>
+                                        <strong>Para:</strong>
+                                        {{ 'O Estado' if t['destino'] == banco_nome else t['destino'] }}
+                                    {% else %}
+                                        <span class="seta">&#8595;</span>
+                                        <strong>De:</strong>
+                                        {{ 'O Estado' if t['origem'] == banco_nome else t['origem'] }}
+                                    {% endif %}
+                                </div>
+                                {% if t['descricao'] %}
+                                    <p class="transacao-descricao">{{ t['descricao'] }}</p>
+                                {% endif %}
+                                <small class="transacao-data">
+                                    {{ t['data_hora'] }}
+                                </small>
+                            </div>
+                            <div class="transacao-valor {% if t['origem'] == usuario['nome'] %}negativo{% else %}positivo{% endif %}">
+                                {% if t['origem'] == usuario['nome'] %}
+                                    -R$ {{ "%.2f"|format(t['valor']) }}
+                                {% else %}
+                                    +R$ {{ "%.2f"|format(t['valor']) }}
+                                {% endif %}
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="vazio">
+                    <p>Nenhuma transacao realizada ainda.</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    const pane = document.getElementById('j-cartas');
+    if (!pane) return;
+    const api = pane.dataset.cartasApi;
+    const conteudo = pane.querySelector('.cartas-conteudo');
+    const chaveVista = 'ultima_carta_vista:' + (pane.dataset.usuario || '0');
+    const btnAba = document.querySelector('.tab-btn[data-pane="j-cartas"]');
+    const inventario = pane.querySelector('.cartas-inventario');
+
+    function vista() {
+        try { return parseInt(localStorage.getItem(chaveVista) || '0', 10) || 0; }
+        catch (e) { return 0; }
+    }
+    function setVista(id) {
+        try { localStorage.setItem(chaveVista, String(id)); } catch (e) {}
+    }
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"]/g, function (ch) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch];
+        });
+    }
+    function fmtValor(v) {
+        var abs = Math.abs(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        return (v >= 0 ? '+R$ ' : '-R$ ') + abs;
+    }
+
+    function montarDestaque(c, nova) {
+        var valorHtml = '';
+        if (c.aplicada && c.valor_aplicado !== null && c.valor_aplicado !== undefined) {
+            valorHtml = '<div class="carta-valor">' + fmtValor(c.valor_aplicado) + '</div>';
+        }
+        return '<article class="carta-destaque classe-' + esc(c.classe) + (nova ? ' nova' : '') +
+            '" data-carta-id="' + c.id + '">' +
+            '<div class="carta-selo">' + esc(c.classe_rotulo) + '</div>' +
+            '<span class="carta-nova">NOVA</span>' +
+            '<span class="carta-estrela">★</span>' +
+            '<h3>' + esc(c.titulo) + '</h3>' +
+            '<p class="carta-texto">' + esc(c.texto) + '</p>' +
+            valorHtml +
+            '</article>';
+    }
+    function montarMini(c) {
+        return '<div class="carta-mini classe-' + esc(c.classe) + '">' +
+            '<div class="carta-mini-topo"><span class="carta-classe">' + esc(c.classe_rotulo) + '</span></div>' +
+            '<h4>' + esc(c.titulo) + '</h4>' +
+            '<p>' + esc(c.texto) + '</p>' +
+            '</div>';
+    }
+
+    function render(cartas) {
+        if (!cartas.length) {
+            conteudo.innerHTML = '<div class="vazio"><p>Voce ainda nao tirou nenhuma carta.</p></div>';
+            conteudo.dataset.newest = '0';
+            return;
+        }
+        var nova = cartas[0].id > vista();
+        var html = montarDestaque(cartas[0], nova);
+        if (cartas.length > 1) {
+            html += '<h4 class="cartas-sub">Cartas anteriores</h4><div class="cartas-hist">';
+            for (var i = 1; i < cartas.length; i++) html += montarMini(cartas[i]);
+            html += '</div>';
+        }
+        conteudo.innerHTML = html;
+        conteudo.dataset.newest = String(cartas[0].id);
+        if (nova) {
+            setVista(cartas[0].id);
+            if (btnAba && !pane.classList.contains('show')) btnAba.classList.add('tem-nova');
+        }
+    }
+
+    function montarProtecao(p) {
+        return '<div class="protecao-item classe-' + esc(p.classe) + '">' +
+            '<div class="protecao-info"><strong>' + esc(p.titulo) + '</strong>' +
+            '<small>' + esc(p.texto) + '</small></div>' +
+            '<form method="POST" action="/cartas/' + p.id + '/usar" ' +
+            'onsubmit="return confirm(\'Usar sua carta de protecao? Ela sera consumida.\');">' +
+            '<button class="btn btn-primary" type="submit">Usar</button></form>' +
+            '</div>';
+    }
+    function renderInventario(protecoes) {
+        if (!inventario) return;
+        if (!protecoes.length) { inventario.innerHTML = ''; return; }
+        var html = '<div class="inv-bloco"><h4 class="cartas-sub">Minhas protecoes</h4><div class="inv-list">';
+        for (var i = 0; i < protecoes.length; i++) html += montarProtecao(protecoes[i]);
+        html += '</div></div>';
+        inventario.innerHTML = html;
+    }
+
+    var ultimaAssinatura = null;
+    function assinatura(cartas, protecoes) {
+        return cartas.map(function (c) {
+            return c.id + ':' + (c.aplicada ? 1 : 0) + ':' + c.valor_aplicado;
+        }).join('|') + '#P#' + protecoes.map(function (p) { return p.id; }).join(',');
+    }
+
+    function atualizar() {
+        fetch(api, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (data) {
+                if (!data) return;
+                var cartas = data.cartas || [];
+                var protecoes = data.protecoes || [];
+                var assin = assinatura(cartas, protecoes);
+                if (assin === ultimaAssinatura) return;
+                ultimaAssinatura = assin;
+                render(cartas);
+                renderInventario(protecoes);
+            })
+            .catch(function () {});
+    }
+
+    if (btnAba) {
+        btnAba.addEventListener('click', function () { btnAba.classList.remove('tem-nova'); });
+    }
+
+    atualizar();
+    setInterval(atualizar, 4000);
+})();
+</script>
 {% endblock %}

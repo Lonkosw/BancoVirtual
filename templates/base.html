@@ -3,17 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Banco Imobiliario{% endblock %}</title>
+    <title>{% block title %}O Capital{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <header class="navbar">
         <div class="navbar-container">
-            <a href="{{ url_for('index') }}" class="logo">Banco Imobiliario</a>
+            <a href="{{ url_for('index') }}" class="logo"><span class="logo-star">&#9733;</span> O Capital</a>
             <div class="nav-user">
-                <a href="{{ url_for('admin_dashboard') if session.admin_logado else url_for('admin_entrar') }}" class="nav-link">Banco</a>
+                <a href="{{ url_for('admin_dashboard') if session.admin_logado else url_for('admin_entrar') }}" class="nav-link">Comite Central</a>
                 {% if session.admin_logado %}
-                    <a href="{{ url_for('admin_sair') }}" class="btn-logout">Sair admin</a>
+                    <a href="{{ url_for('admin_sair') }}" class="btn-logout">Sair do comite</a>
                 {% endif %}
                 {% if session.usuario_id %}
                     <span class="usuario-logado">{{ session.usuario_nome }}</span>
@@ -39,7 +42,7 @@
     </main>
 
     <footer class="footer">
-        <p>&copy; 2026 Banco Imobiliario | Sistema de Transacoes</p>
+        <p><span class="logo-star">&#9733;</span> O Capital | Banco da Partida &mdash; consciencia de classe em jogo</p>
     </footer>
 
     <script>
@@ -53,6 +56,36 @@
             setTimeout(() => {
                 alert.style.display = 'none';
             }, 5000);
+        });
+
+        // Navegacao por abas. Grupos com data-tab-key lembram a ultima aba ativa
+        // (localStorage), para o usuario permanecer na mesma aba apos qualquer acao.
+        document.querySelectorAll('[data-tabs]').forEach(grupo => {
+            const chave = grupo.dataset.tabKey;
+
+            function ativar(paneId, salvar) {
+                const pane = grupo.querySelector('#' + paneId);
+                const btn = grupo.querySelector('.tab-btn[data-pane="' + paneId + '"]');
+                if (!pane || !btn) return false;
+                grupo.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                grupo.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('show'));
+                btn.classList.add('active');
+                pane.classList.add('show');
+                if (salvar && chave) {
+                    try { localStorage.setItem('tab:' + chave, paneId); } catch (e) {}
+                }
+                return true;
+            }
+
+            grupo.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', () => ativar(btn.dataset.pane, true));
+            });
+
+            if (chave) {
+                let salvo = null;
+                try { salvo = localStorage.getItem('tab:' + chave); } catch (e) {}
+                if (salvo) ativar(salvo, false);
+            }
         });
     </script>
 

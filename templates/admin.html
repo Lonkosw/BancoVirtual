@@ -1,18 +1,22 @@
 {% extends "base.html" %}
 
-{% block title %}Painel do Banco - Banco Imobiliario{% endblock %}
+{% block title %}Comite Central - O Capital{% endblock %}
 
 {% block content %}
 <div class="admin-page">
     <section class="admin-header">
         <div>
-            <p class="eyebrow">Painel do banco</p>
+            <p class="eyebrow">Comite Central</p>
             <h2>Administracao da partida</h2>
         </div>
         <div class="admin-stats">
             <div>
-                <span>Jogadores</span>
-                <strong>{{ jogadores|length }}</strong>
+                <span>Camaradas ativos</span>
+                <strong>{{ total_ativos }}</strong>
+            </div>
+            <div>
+                <span>Falidos</span>
+                <strong class="{% if total_falidos %}stat-falido{% endif %}">{{ total_falidos }}</strong>
             </div>
             <div>
                 <span>Saldo em jogo</span>
@@ -25,130 +29,351 @@
         </div>
     </section>
 
-    <section class="admin-grid">
-        <div class="admin-panel start-panel">
-            <h3>Passar pelo inicio</h3>
-            <form method="POST" action="{{ url_for('admin_config_passou_inicio') }}" class="compact-form">
-                <div class="form-group">
-                    <label for="valor_passou_inicio">Valor pago ao jogador</label>
-                    <input
-                        id="valor_passou_inicio"
-                        name="valor_passou_inicio"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value="{{ '%.2f'|format(valor_passou_inicio) }}"
-                        class="form-control"
-                    >
-                </div>
-                <button class="btn btn-primary" type="submit">Salvar valor</button>
-            </form>
-        </div>
+    <div class="admin-tabs" data-tabs data-tab-key="admin">
+        <nav class="tab-nav">
+            <button type="button" class="tab-btn active" data-pane="pane-camaradas">
+                Camaradas <span class="tab-cnt">{{ jogadores|length }}</span>
+            </button>
+            <button type="button" class="tab-btn" data-pane="pane-props">
+                Propriedades <span class="tab-cnt">{{ propriedades|length }}</span>
+            </button>
+            <button type="button" class="tab-btn" data-pane="pane-cartas">Cartas</button>
+            <button type="button" class="tab-btn" data-pane="pane-movs">Movimentos</button>
+            <button type="button" class="tab-btn" data-pane="pane-partida">Partida</button>
+        </nav>
 
-        <div class="admin-panel">
-            <h3>Novo jogador</h3>
-            <form method="POST" action="{{ url_for('admin_criar_jogador') }}" class="compact-form">
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="nome">Nome</label>
-                        <input id="nome" name="nome" type="text" required minlength="2" maxlength="50" class="form-control">
+        <!-- ABA: CAMARADAS -->
+        <div class="tab-pane show" id="pane-camaradas">
+            <section class="admin-panel jogadores-panel">
+                <div class="section-title">
+                    <h3>Camaradas</h3>
+                    <span>{{ jogadores|length }} ativos</span>
+                </div>
+
+                {% if jogadores %}
+                    <div class="jogadores-list">
+                        {% for jogador in jogadores %}
+                            <article class="jogador-card {% if jogador['falido'] %}falido{% endif %}">
+                                {% if jogador['falido'] %}<div class="selo-falido">Falido</div>{% endif %}
+                                <div class="jogador-main">
+                                    <strong>{{ jogador['nome'] }}</strong>
+                                    <span>R$ {{ "%.2f"|format(jogador['saldo']) }}</span>
+                                </div>
+
+                                <form method="POST" action="{{ url_for('admin_passou_inicio', usuario_id=jogador['id']) }}" class="passou-inicio-form">
+                                    <button class="btn btn-start" type="submit">
+                                        Passou pelo inicio: +R$ {{ "%.2f"|format(valor_passou_inicio) }}
+                                    </button>
+                                </form>
+
+                                <form method="POST" action="{{ url_for('admin_ajustar_saldo', usuario_id=jogador['id']) }}" class="saldo-form">
+                                    <select name="acao" class="form-control" aria-label="Acao de saldo">
+                                        <option value="creditar">Creditar</option>
+                                        <option value="debitar">Debitar</option>
+                                        <option value="definir">Definir</option>
+                                    </select>
+                                    <input name="valor" type="number" min="0" step="0.01" placeholder="Valor" required class="form-control">
+                                    <input name="descricao" type="text" maxlength="140" placeholder="Descricao" class="form-control">
+                                    <button class="btn btn-primary" type="submit">Aplicar</button>
+                                </form>
+
+                                <form method="POST" action="{{ url_for('admin_excluir_jogador', usuario_id=jogador['id']) }}" class="delete-form">
+                                    <button class="btn btn-ghost" type="submit">Excluir se sem historico</button>
+                                </form>
+                            </article>
+                        {% endfor %}
                     </div>
-                    <div class="form-group">
-                        <label for="saldo_inicial">Saldo inicial</label>
-                        <input id="saldo_inicial" name="saldo_inicial" type="number" min="0" step="0.01" value="1500" class="form-control">
+                {% else %}
+                    <div class="vazio">
+                        <p>Nenhum camarada recrutado ainda.</p>
                     </div>
+                {% endif %}
+            </section>
+        </div>
+
+        <!-- ABA: PROPRIEDADES -->
+        <div class="tab-pane" id="pane-props">
+            <section class="admin-panel propriedades-panel">
+                <div class="section-title">
+                    <h3>Propriedades</h3>
+                    <span>{{ propriedades|length }} no tabuleiro</span>
                 </div>
-                <button class="btn btn-primary" type="submit">Criar jogador</button>
-            </form>
+
+                {% if propriedades %}
+                    <div class="propriedades-list">
+                        {% for p in propriedades %}
+                            <article class="propriedade-card {% if p['hipotecada'] %}hipotecada{% endif %}">
+                                <div class="prop-topo">
+                                    <span class="prop-cor" style="background: {{ p['grupo'] or '#888' }}"></span>
+                                    <div class="prop-nome">
+                                        <strong>{{ p['nome'] }}</strong>
+                                        <small>{{ p['grupo'] or 'sem grupo' }} - pos {{ p['posicao'] }}</small>
+                                    </div>
+                                    <span class="prop-nivel">{{ p['nivel_texto'] }}</span>
+                                </div>
+
+                                <div class="prop-dados">
+                                    <span>Compra: <strong>R$ {{ "%.2f"|format(p['preco_compra']) }}</strong></span>
+                                    <span>Aluguel atual: <strong>R$ {{ "%.2f"|format(p['aluguel_atual']) }}</strong></span>
+                                    <span>Casa: R$ {{ "%.2f"|format(p['custo_casa']) }}</span>
+                                    <span>Hipoteca: R$ {{ "%.2f"|format(p['valor_hipoteca']) }}</span>
+                                </div>
+
+                                <div class="prop-dono">
+                                    {% if p['dono_id'] %}
+                                        Dono: <strong>{{ p['dono_nome'] }}</strong>
+                                        {% if p['hipotecada'] %}<span class="tag-hipoteca">HIPOTECADA</span>{% endif %}
+                                    {% else %}
+                                        <em>Disponivel</em>
+                                    {% endif %}
+                                </div>
+
+                                {% if not p['dono_id'] %}
+                                    <form method="POST" action="{{ url_for('admin_comprar_propriedade', propriedade_id=p['id']) }}" class="prop-form">
+                                        <select name="dono_id" class="form-control" required aria-label="Comprador">
+                                            <option value="">Vender para...</option>
+                                            {% for j in jogadores %}
+                                                <option value="{{ j['id'] }}">{{ j['nome'] }}</option>
+                                            {% endfor %}
+                                        </select>
+                                        <button class="btn btn-primary" type="submit">Comprar</button>
+                                    </form>
+                                {% else %}
+                                    <div class="prop-acoes">
+                                        <form method="POST" action="{{ url_for('admin_cobrar_aluguel', propriedade_id=p['id']) }}" class="prop-form">
+                                            <select name="inquilino_id" class="form-control" required aria-label="Quem caiu">
+                                                <option value="">Cobrar de...</option>
+                                                {% for j in jogadores %}
+                                                    {% if j['id'] != p['dono_id'] %}
+                                                        <option value="{{ j['id'] }}">{{ j['nome'] }}</option>
+                                                    {% endif %}
+                                                {% endfor %}
+                                            </select>
+                                            <button class="btn btn-start" type="submit">Cobrar aluguel</button>
+                                        </form>
+
+                                        <div class="prop-botoes">
+                                            {% if not p['hipotecada'] and not p['tem_hotel'] %}
+                                                <form method="POST" action="{{ url_for('admin_construir', propriedade_id=p['id']) }}">
+                                                    <button class="btn btn-ghost" type="submit">+ Casa/Hotel</button>
+                                                </form>
+                                            {% endif %}
+                                            {% if p['num_casas'] > 0 or p['tem_hotel'] %}
+                                                <form method="POST" action="{{ url_for('admin_vender_casa', propriedade_id=p['id']) }}">
+                                                    <button class="btn btn-ghost" type="submit">- Casa/Hotel</button>
+                                                </form>
+                                            {% endif %}
+                                            <form method="POST" action="{{ url_for('admin_hipotecar', propriedade_id=p['id']) }}">
+                                                <button class="btn btn-ghost" type="submit">
+                                                    {{ 'Quitar hipoteca' if p['hipotecada'] else 'Hipotecar' }}
+                                                </button>
+                                            </form>
+                                            <form method="POST" action="{{ url_for('admin_liberar_propriedade', propriedade_id=p['id']) }}">
+                                                <button class="btn btn-ghost" type="submit">Devolver ao banco</button>
+                                            </form>
+                                        </div>
+                                    </div>
+                                {% endif %}
+                            </article>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="vazio">
+                        <p>Nenhuma propriedade importada. Rode <code>python importar_tabuleiro.py</code>.</p>
+                    </div>
+                {% endif %}
+            </section>
         </div>
 
-        <div class="admin-panel danger-panel">
-            <h3>Resetar partida</h3>
-            <form method="POST" action="{{ url_for('admin_resetar') }}" class="compact-form">
-                <div class="form-group">
-                    <label for="confirmar">Confirmacao</label>
-                    <input id="confirmar" name="confirmar" type="text" placeholder="Digite RESETAR" class="form-control">
-                </div>
-                <button class="btn btn-danger" type="submit">Limpar jogadores e historico</button>
-            </form>
-        </div>
-    </section>
-
-    <section class="admin-panel jogadores-panel">
-        <div class="section-title">
-            <h3>Jogadores</h3>
-            <span>{{ jogadores|length }} ativos</span>
-        </div>
-
-        {% if jogadores %}
-            <div class="jogadores-list">
-                {% for jogador in jogadores %}
-                    <article class="jogador-card">
-                        <div class="jogador-main">
-                            <strong>{{ jogador['nome'] }}</strong>
-                            <span>R$ {{ "%.2f"|format(jogador['saldo']) }}</span>
-                        </div>
-
-                        <form method="POST" action="{{ url_for('admin_passou_inicio', usuario_id=jogador['id']) }}" class="passou-inicio-form">
-                            <button class="btn btn-start" type="submit">
-                                Passou pelo inicio: +R$ {{ "%.2f"|format(valor_passou_inicio) }}
-                            </button>
-                        </form>
-
-                        <form method="POST" action="{{ url_for('admin_ajustar_saldo', usuario_id=jogador['id']) }}" class="saldo-form">
-                            <select name="acao" class="form-control" aria-label="Acao de saldo">
-                                <option value="creditar">Creditar</option>
-                                <option value="debitar">Debitar</option>
-                                <option value="definir">Definir</option>
+        <!-- ABA: CARTAS -->
+        <div class="tab-pane" id="pane-cartas">
+            <section class="admin-panel start-panel">
+                <h3>Tirar carta</h3>
+                <p class="muted">Selecione o camarada que caiu na casa e o baralho.</p>
+                <form method="POST" action="{{ url_for('admin_tirar_carta') }}" class="compact-form">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="carta_usuario">Camarada</label>
+                            <select id="carta_usuario" name="usuario_id" class="form-control" required>
+                                <option value="">Selecione...</option>
+                                {% for j in jogadores %}
+                                    <option value="{{ j['id'] }}">{{ j['nome'] }}</option>
+                                {% endfor %}
                             </select>
-                            <input name="valor" type="number" min="0" step="0.01" placeholder="Valor" required class="form-control">
-                            <input name="descricao" type="text" maxlength="140" placeholder="Descricao" class="form-control">
-                            <button class="btn btn-primary" type="submit">Aplicar</button>
-                        </form>
+                        </div>
+                        <div class="form-group">
+                            <label for="carta_classe">Baralho</label>
+                            <select id="carta_classe" name="classe" class="form-control" required>
+                                <option value="burguesia">Burguesia</option>
+                                <option value="proletariado">Proletariado</option>
+                                <option value="rara">Rara</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" type="submit">Tirar carta</button>
+                </form>
+            </section>
 
-                        <form method="POST" action="{{ url_for('admin_excluir_jogador', usuario_id=jogador['id']) }}" class="delete-form">
-                            <button class="btn btn-ghost" type="submit">Excluir se sem historico</button>
-                        </form>
-                    </article>
-                {% endfor %}
-            </div>
-        {% else %}
-            <div class="vazio">
-                <p>Nenhum jogador criado ainda.</p>
-            </div>
-        {% endif %}
-    </section>
+            <section class="admin-panel start-panel">
+                <div class="section-title">
+                    <h3>Protecoes</h3>
+                    <span>Cartas guardadas pelos jogadores</span>
+                </div>
+                {% if protecoes_posse %}
+                    <div class="protecao-posse">
+                        {% for pp in protecoes_posse %}
+                            <span class="protecao-tag">{{ pp['nome'] }}: {{ pp['qtd'] }}</span>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="muted">Ninguem tem protecao guardada.</p>
+                {% endif %}
 
-    <section class="admin-panel">
-        <div class="section-title">
-            <h3>Historico global</h3>
-            <span>Ultimos 50 movimentos</span>
+                {% if protecoes_usadas %}
+                    <h4 class="cartas-sub">Usadas recentemente</h4>
+                    <div class="protecao-usos">
+                        {% for pu in protecoes_usadas %}
+                            <div class="protecao-uso">
+                                <span><strong>{{ pu['nome'] }}</strong> usou <em>{{ pu['titulo'] }}</em></span>
+                                <small>{{ pu['protecao_usada_em'] }}</small>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            </section>
+
+            <section class="admin-panel">
+                <div class="section-title">
+                    <h3>Cartas recentes</h3>
+                    <span>Ultimos sorteios</span>
+                </div>
+
+                {% if cartas_recentes %}
+                    <div class="cartas-recentes">
+                        {% for c in cartas_recentes %}
+                            <article class="carta-mini classe-{{ c['classe'] }}">
+                                <div class="carta-mini-topo">
+                                    <span class="carta-classe">{{ rotulo_classe[c['classe']] }}</span>
+                                    <strong>{{ c['jogador'] }}</strong>
+                                </div>
+                                <h4>{{ c['titulo'] }}</h4>
+                                <p>{{ c['texto'] }}</p>
+                                <div class="carta-mini-rodape">
+                                    {% if c['aplicada'] %}
+                                        <span class="carta-status ok">
+                                            {% if c['valor_aplicado'] is not none and c['valor_aplicado'] >= 0 %}
+                                                Aplicada: +R$ {{ "%.2f"|format(c['valor_aplicado']) }}
+                                            {% elif c['valor_aplicado'] is not none %}
+                                                Aplicada: -R$ {{ "%.2f"|format(-c['valor_aplicado']) }}
+                                            {% else %}
+                                                Aplicada
+                                            {% endif %}
+                                        </span>
+                                    {% elif c['valor'] is not none or c['percentual'] is not none %}
+                                        <form method="POST" action="{{ url_for('admin_aplicar_carta', tirada_id=c['id']) }}">
+                                            <button class="btn btn-start" type="submit">Aplicar ao caixa</button>
+                                        </form>
+                                    {% else %}
+                                        <span class="carta-status manual">Efeito manual no tabuleiro</span>
+                                    {% endif %}
+                                </div>
+                            </article>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="vazio">
+                        <p>Nenhuma carta tirada ainda.</p>
+                    </div>
+                {% endif %}
+            </section>
         </div>
 
-        {% if transacoes %}
-            <div class="admin-history">
-                {% for t in transacoes %}
-                    <div class="history-row">
-                        <div>
-                            <strong>
-                                {{ 'Banco' if t['origem'] == banco_nome else t['origem'] }}
-                                para
-                                {{ 'Banco' if t['destino'] == banco_nome else t['destino'] }}
-                            </strong>
-                            {% if t['descricao'] %}
-                                <p>{{ t['descricao'] }}</p>
-                            {% endif %}
-                            <small>{{ t['data_hora'] }}</small>
-                        </div>
-                        <span>R$ {{ "%.2f"|format(t['valor']) }}</span>
+        <!-- ABA: MOVIMENTOS -->
+        <div class="tab-pane" id="pane-movs">
+            <section class="admin-panel">
+                <div class="section-title">
+                    <h3>Historico global</h3>
+                    <span>Ultimos 50 movimentos</span>
+                </div>
+
+                {% if transacoes %}
+                    <div class="admin-history">
+                        {% for t in transacoes %}
+                            <div class="history-row">
+                                <div>
+                                    <strong>
+                                        {{ 'O Estado' if t['origem'] == banco_nome else t['origem'] }}
+                                        para
+                                        {{ 'O Estado' if t['destino'] == banco_nome else t['destino'] }}
+                                    </strong>
+                                    {% if t['descricao'] %}
+                                        <p>{{ t['descricao'] }}</p>
+                                    {% endif %}
+                                    <small>{{ t['data_hora'] }}</small>
+                                </div>
+                                <span>R$ {{ "%.2f"|format(t['valor']) }}</span>
+                            </div>
+                        {% endfor %}
                     </div>
-                {% endfor %}
-            </div>
-        {% else %}
-            <div class="vazio">
-                <p>Nenhuma movimentacao registrada ainda.</p>
-            </div>
-        {% endif %}
-    </section>
+                {% else %}
+                    <div class="vazio">
+                        <p>Nenhuma movimentacao registrada ainda.</p>
+                    </div>
+                {% endif %}
+            </section>
+        </div>
+
+        <!-- ABA: PARTIDA -->
+        <div class="tab-pane" id="pane-partida">
+            <section class="admin-grid">
+                <div class="admin-panel start-panel">
+                    <h3>Passar pelo inicio</h3>
+                    <form method="POST" action="{{ url_for('admin_config_passou_inicio') }}" class="compact-form">
+                        <div class="form-group">
+                            <label for="valor_passou_inicio">Valor pago ao jogador</label>
+                            <input
+                                id="valor_passou_inicio"
+                                name="valor_passou_inicio"
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value="{{ '%.2f'|format(valor_passou_inicio) }}"
+                                class="form-control"
+                            >
+                        </div>
+                        <button class="btn btn-primary" type="submit">Salvar valor</button>
+                    </form>
+                </div>
+
+                <div class="admin-panel">
+                    <h3>Novo camarada</h3>
+                    <form method="POST" action="{{ url_for('admin_criar_jogador') }}" class="compact-form">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="nome">Nome</label>
+                                <input id="nome" name="nome" type="text" required minlength="2" maxlength="50" class="form-control">
+                            </div>
+                            <div class="form-group">
+                                <label for="saldo_inicial">Saldo inicial</label>
+                                <input id="saldo_inicial" name="saldo_inicial" type="number" min="0" step="0.01" value="1500" class="form-control">
+                            </div>
+                        </div>
+                        <button class="btn btn-primary" type="submit">Recrutar camarada</button>
+                    </form>
+                </div>
+
+                <div class="admin-panel danger-panel">
+                    <h3>Resetar partida</h3>
+                    <form method="POST" action="{{ url_for('admin_resetar') }}" class="compact-form">
+                        <div class="form-group">
+                            <label for="confirmar">Confirmacao</label>
+                            <input id="confirmar" name="confirmar" type="text" placeholder="Digite RESETAR" class="form-control">
+                        </div>
+                        <button class="btn btn-danger" type="submit">Limpar camaradas e historico</button>
+                    </form>
+                </div>
+            </section>
+        </div>
+    </div>
 </div>
 {% endblock %}
