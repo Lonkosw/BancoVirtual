@@ -38,12 +38,45 @@
                 Propriedades <span class="tab-cnt">{{ propriedades|length }}</span>
             </button>
             <button type="button" class="tab-btn" data-pane="pane-cartas">Cartas</button>
+            <button type="button" class="tab-btn" data-pane="pane-quiz">Quiz</button>
+            <button type="button" class="tab-btn" data-pane="pane-estado">
+                Estado{% if vencedores %} <span class="tab-cnt tab-vitoria">!</span>{% endif %}
+            </button>
             <button type="button" class="tab-btn" data-pane="pane-movs">Movimentos</button>
             <button type="button" class="tab-btn" data-pane="pane-partida">Partida</button>
         </nav>
 
         <!-- ABA: CAMARADAS -->
         <div class="tab-pane show" id="pane-camaradas">
+            <section class="admin-panel start-panel">
+                <h3>Eventos de casa</h3>
+                <p class="muted">Ganhos, perdas e fianca. O valor certo por classe e aplicado no caixa (1 clique).</p>
+                <form method="POST" action="{{ url_for('admin_aplicar_evento') }}" class="compact-form">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="evento_usuario">Camarada</label>
+                            <select id="evento_usuario" name="usuario_id" class="form-control" required>
+                                <option value="">Selecione...</option>
+                                {% for j in jogadores %}
+                                    <option value="{{ j['id'] }}">{{ j['nome'] }}{% if j['classe'] %} ({{ rotulo_classe_jogador[j['classe']] }}){% endif %}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="evento_chave">Casa</label>
+                            <select id="evento_chave" name="chave" class="form-control" required>
+                                {% for chave, nome, burg, prol in eventos_casa %}
+                                    <option value="{{ chave }}">
+                                        {{ nome }} (Burg {{ '+' if burg >= 0 else '' }}{{ "%.0f"|format(burg) }} / Prol {{ '+' if prol >= 0 else '' }}{{ "%.0f"|format(prol) }})
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" type="submit">Aplicar evento</button>
+                </form>
+            </section>
+
             <section class="admin-panel jogadores-panel">
                 <div class="section-title">
                     <h3>Camaradas</h3>
@@ -56,13 +89,19 @@
                             <article class="jogador-card {% if jogador['falido'] %}falido{% endif %}">
                                 {% if jogador['falido'] %}<div class="selo-falido">Falido</div>{% endif %}
                                 <div class="jogador-main">
-                                    <strong>{{ jogador['nome'] }}</strong>
+                                    <strong>
+                                        {{ jogador['nome'] }}
+                                        {% if jogador['classe'] %}
+                                            <span class="classe-badge classe-jog-{{ jogador['classe'] }}">{{ rotulo_classe_jogador[jogador['classe']] }}</span>
+                                        {% endif %}
+                                    </strong>
                                     <span>R$ {{ "%.2f"|format(jogador['saldo']) }}</span>
                                 </div>
 
+                                {% set renda = renda_burgues if jogador['classe'] == 'burgues' else (renda_proletario if jogador['classe'] == 'proletario' else valor_passou_inicio) %}
                                 <form method="POST" action="{{ url_for('admin_passou_inicio', usuario_id=jogador['id']) }}" class="passou-inicio-form">
                                     <button class="btn btn-start" type="submit">
-                                        Passou pelo inicio: +R$ {{ "%.2f"|format(valor_passou_inicio) }}
+                                        Renda por volta: +R$ {{ "%.0f"|format(renda) }}
                                     </button>
                                 </form>
 
@@ -204,9 +243,9 @@
                         <div class="form-group">
                             <label for="carta_classe">Baralho</label>
                             <select id="carta_classe" name="classe" class="form-control" required>
+                                <option value="auto">Automatico (classe do jogador)</option>
                                 <option value="burguesia">Burguesia</option>
                                 <option value="proletariado">Proletariado</option>
-                                <option value="rara">Rara</option>
                             </select>
                         </div>
                     </div>
@@ -288,6 +327,129 @@
             </section>
         </div>
 
+        <!-- ABA: QUIZ -->
+        <div class="tab-pane" id="pane-quiz">
+            <section class="admin-panel start-panel">
+                <h3>Enviar Quiz Filosofico</h3>
+                <p class="muted">A pergunta aparece na tela do jogador. Ao responder, o app aplica o buff/debuff sozinho.</p>
+                <form method="POST" action="{{ url_for('admin_enviar_quiz') }}" class="compact-form">
+                    <div class="form-group">
+                        <label for="quiz_usuario">Camarada</label>
+                        <select id="quiz_usuario" name="usuario_id" class="form-control" required>
+                            <option value="">Selecione...</option>
+                            {% for j in jogadores %}
+                                <option value="{{ j['id'] }}">{{ j['nome'] }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <button class="btn btn-primary" type="submit">Enviar pergunta</button>
+                </form>
+                <p class="muted">Acerto: 75% buff / 25% debuff. Erro: sempre debuff.</p>
+            </section>
+
+            <section class="admin-panel">
+                <div class="section-title">
+                    <h3>Quiz recentes</h3>
+                    <span>Ultimas rodadas</span>
+                </div>
+                {% if quiz_recentes %}
+                    <div class="quiz-recentes">
+                        {% for q in quiz_recentes %}
+                            <article class="quiz-rec {% if q['respondida'] %}{{ 'certo' if q['acertou'] else 'errado' }}{% else %}pendente{% endif %}">
+                                <div class="quiz-rec-topo">
+                                    <strong>{{ q['jogador'] }}</strong>
+                                    {% if q['respondida'] %}
+                                        <span class="quiz-rec-status">{{ 'Acertou' if q['acertou'] else 'Errou' }} ({{ q['escolha']|upper }})</span>
+                                    {% else %}
+                                        <span class="quiz-rec-status">Aguardando</span>
+                                    {% endif %}
+                                </div>
+                                <p class="quiz-rec-pergunta">{{ q['numero'] }}. {{ q['texto'] }}</p>
+                                {% if q['respondida'] and q['res_texto'] %}
+                                    <span class="quiz-rec-res">Resultado: {{ q['res_texto'] }}</span>
+                                {% endif %}
+                            </article>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="vazio"><p>Nenhum quiz enviado ainda.</p></div>
+                {% endif %}
+            </section>
+        </div>
+
+        <!-- ABA: ESTADO -->
+        <div class="tab-pane" id="pane-estado">
+            {% if vencedores %}
+                <section class="admin-panel vitoria-panel">
+                    <h3>Condicao de vitoria atingida</h3>
+                    {% for v in vencedores %}
+                        <div class="vitoria-banner vitoria-{{ v['tipo']|lower }}">
+                            <strong>{{ v['tipo'] }}</strong>
+                            <span>{{ v['quem'] }} - {{ v['detalhe'] }}</span>
+                        </div>
+                    {% endfor %}
+                </section>
+            {% endif %}
+
+            <section class="admin-panel start-panel">
+                <div class="section-title">
+                    <h3>Fundo de Greve</h3>
+                    <span>Meta: R$ {{ "%.0f"|format(fundo_meta) }}</span>
+                </div>
+                <div class="fundo-barra">
+                    <div class="fundo-preenchido" style="width: {{ fundo_pct }}%"></div>
+                    <span class="fundo-label">R$ {{ "%.0f"|format(fundo_greve) }} / R$ {{ "%.0f"|format(fundo_meta) }}</span>
+                </div>
+                <form method="POST" action="{{ url_for('admin_fundo_adicionar') }}" class="compact-form">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="fundo_valor">Adicionar</label>
+                            <input id="fundo_valor" name="valor" type="number" min="0" step="0.01" placeholder="Valor" required class="form-control">
+                        </div>
+                        <div class="form-group">
+                            <label for="fundo_contrib">Debitar de (opcional)</label>
+                            <select id="fundo_contrib" name="usuario_id" class="form-control">
+                                <option value="">Ninguem (so somar)</option>
+                                {% for j in jogadores %}
+                                    <option value="{{ j['id'] }}">{{ j['nome'] }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" type="submit">Adicionar ao fundo</button>
+                </form>
+                <form method="POST" action="{{ url_for('admin_fundo_zerar') }}" class="delete-form">
+                    <button class="btn btn-ghost" type="submit">Zerar fundo</button>
+                </form>
+            </section>
+
+            <section class="admin-panel">
+                <div class="section-title">
+                    <h3>Ranking de patrimonio</h3>
+                    <span>Saldo + propriedades + construcoes</span>
+                </div>
+                {% if ranking %}
+                    <div class="ranking-list">
+                        {% for r in ranking %}
+                            <div class="ranking-row {% if r['falido'] %}falido{% endif %}">
+                                <span class="ranking-pos">{{ loop.index }}</span>
+                                <div class="ranking-info">
+                                    <strong>{{ r['nome'] }}</strong>
+                                    {% if r['classe'] %}
+                                        <span class="classe-badge classe-jog-{{ r['classe'] }}">{{ r['classe_rotulo'] }}</span>
+                                    {% endif %}
+                                </div>
+                                <span class="ranking-patr">R$ {{ "%.0f"|format(r['patrimonio']) }}</span>
+                            </div>
+                        {% endfor %}
+                    </div>
+                    <p class="muted">Metas: Hegemonia (burgues) R$ 80.000 - Ascensao (proletario) R$ 20.000 - Revolucao (fundo) R$ 30.000.</p>
+                {% else %}
+                    <div class="vazio"><p>Nenhum camarada na partida.</p></div>
+                {% endif %}
+            </section>
+        </div>
+
         <!-- ABA: MOVIMENTOS -->
         <div class="tab-pane" id="pane-movs">
             <section class="admin-panel">
@@ -354,11 +516,36 @@
                                 <input id="nome" name="nome" type="text" required minlength="2" maxlength="50" class="form-control">
                             </div>
                             <div class="form-group">
+                                <label for="classe">Classe</label>
+                                <select id="classe" name="classe" class="form-control">
+                                    <option value="proletario">Proletario</option>
+                                    <option value="burgues">Burgues</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
                                 <label for="saldo_inicial">Saldo inicial</label>
-                                <input id="saldo_inicial" name="saldo_inicial" type="number" min="0" step="0.01" value="1500" class="form-control">
+                                <input id="saldo_inicial" name="saldo_inicial" type="number" min="0" step="0.01" placeholder="auto pela classe" class="form-control">
                             </div>
                         </div>
+                        <p class="muted">Deixe o saldo em branco para usar o padrao: Burgues R$ {{ "%.0f"|format(15000) }} / Proletario R$ {{ "%.0f"|format(3000) }}.</p>
                         <button class="btn btn-primary" type="submit">Recrutar camarada</button>
+                    </form>
+                </div>
+
+                <div class="admin-panel">
+                    <h3>Renda por volta</h3>
+                    <form method="POST" action="{{ url_for('admin_config_renda') }}" class="compact-form">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="renda_burgues">Burgues</label>
+                                <input id="renda_burgues" name="renda_burgues" type="number" min="0" step="0.01" value="{{ '%.2f'|format(renda_burgues) }}" class="form-control">
+                            </div>
+                            <div class="form-group">
+                                <label for="renda_proletario">Proletario</label>
+                                <input id="renda_proletario" name="renda_proletario" type="number" min="0" step="0.01" value="{{ '%.2f'|format(renda_proletario) }}" class="form-control">
+                            </div>
+                        </div>
+                        <button class="btn btn-primary" type="submit">Salvar renda</button>
                     </form>
                 </div>
 

@@ -10,7 +10,32 @@
         <div class="saldo-valor">
             R$ {{ "%.2f"|format(usuario['saldo']) }}
         </div>
-        <p class="saldo-usuario">{{ usuario['nome'] }}</p>
+        <p class="saldo-usuario">
+            {{ usuario['nome'] }}
+            {% if usuario['classe'] %}
+                <span class="classe-badge classe-jog-{{ usuario['classe'] }}">{{ classe_rotulo }}</span>
+            {% endif %}
+        </p>
+    </section>
+
+    <!-- QUIZ FILOSOFICO (aparece sozinho quando o Comite envia) -->
+    <section class="quiz-wrap" data-quiz-api="{{ url_for('api_meu_quiz') }}"
+             data-quiz-acao="{{ url_for('quiz_responder', rodada_id=0) }}">
+        {% if quiz_pendente %}
+            <form class="quiz-card" method="POST"
+                  action="{{ url_for('quiz_responder', rodada_id=quiz_pendente['id']) }}">
+                <div class="quiz-selo">Quiz Filosofico</div>
+                <h3 class="quiz-pergunta">{{ quiz_pendente['texto'] }}</h3>
+                <div class="quiz-ops">
+                    {% for letra in ['a','b','c','d'] %}
+                        <button type="submit" name="escolha" value="{{ letra }}" class="quiz-op">
+                            <span class="quiz-letra">{{ letra|upper }}</span>
+                            <span>{{ quiz_pendente['op_' ~ letra] }}</span>
+                        </button>
+                    {% endfor %}
+                </div>
+            </form>
+        {% endif %}
     </section>
 
     <section class="acoes-rapidas">
@@ -25,6 +50,7 @@
                 Cartas{% if minhas_cartas %} <span class="tab-cnt">{{ minhas_cartas|length }}</span>{% endif %}
             </button>
             <button type="button" class="tab-btn" data-pane="j-props">Propriedades</button>
+            <button type="button" class="tab-btn" data-pane="j-galeria">Galeria</button>
             <button type="button" class="tab-btn" data-pane="j-hist">Historico</button>
         </nav>
 
@@ -117,6 +143,44 @@
                     <p>Voce ainda nao possui propriedades.</p>
                 </div>
             {% endif %}
+        </div>
+
+        <!-- ABA: GALERIA -->
+        <div class="tab-pane" id="j-galeria">
+            <p class="galeria-intro">Todas as propriedades do tabuleiro, alugueis e estado ao vivo.</p>
+            <div class="galeria-grid">
+                {% for p in galeria %}
+                    <article class="gal-card {% if p['hipotecada'] %}hipotecada{% endif %}">
+                        <div class="gal-faixa" style="background: {{ p['grupo'] or '#888' }}"></div>
+                        <div class="gal-corpo">
+                            <div class="gal-topo">
+                                <strong>{{ p['nome'] }}</strong>
+                                <span class="gal-preco">R$ {{ "%.0f"|format(p['preco_compra']) }}</span>
+                            </div>
+                            <div class="gal-estado">
+                                {% if p['dono_nome'] %}
+                                    Dono: <strong>{{ p['dono_nome'] }}</strong> - {{ p['nivel_texto'] }}
+                                    {% if p['hipotecada'] %}<span class="tag-hip">hipotecada</span>{% endif %}
+                                {% else %}
+                                    <span class="gal-livre">Disponivel</span>
+                                {% endif %}
+                            </div>
+                            <table class="gal-alugueis">
+                                <tr><td>Terreno</td><td>R$ {{ "%.0f"|format(p['alugueis'][0]) }}</td></tr>
+                                <tr><td>1 casa</td><td>R$ {{ "%.0f"|format(p['alugueis'][1]) }}</td></tr>
+                                <tr><td>2 casas</td><td>R$ {{ "%.0f"|format(p['alugueis'][2]) }}</td></tr>
+                                <tr><td>3 casas</td><td>R$ {{ "%.0f"|format(p['alugueis'][3]) }}</td></tr>
+                                <tr><td>4 casas</td><td>R$ {{ "%.0f"|format(p['alugueis'][4]) }}</td></tr>
+                                <tr class="gal-hotel"><td>Hotel</td><td>R$ {{ "%.0f"|format(p['alugueis'][5]) }}</td></tr>
+                            </table>
+                            <div class="gal-rodape">
+                                <span>Casa: R$ {{ "%.0f"|format(p['custo_casa']) }}</span>
+                                <span>Hipoteca: R$ {{ "%.0f"|format(p['valor_hipoteca']) }}</span>
+                            </div>
+                        </div>
+                    </article>
+                {% endfor %}
+            </div>
         </div>
 
         <!-- ABA: HISTORICO -->
@@ -283,6 +347,72 @@
 
     atualizar();
     setInterval(atualizar, 4000);
+})();
+
+// ===== QUIZ FILOSOFICO (polling, aparece sozinho) =====
+(function () {
+    const wrap = document.querySelector('.quiz-wrap');
+    if (!wrap) return;
+    const api = wrap.dataset.quizApi;
+    const acaoBase = wrap.dataset.quizAcao; // .../quiz/0/responder
+    let ultimoPendenteId = wrap.querySelector('.quiz-card') ? 'inicial' : null;
+    let ultimoResultadoId = null;
+
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"]/g, function (ch) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch];
+        });
+    }
+
+    function montarPendente(p) {
+        const acao = acaoBase.replace(/0\/responder$/, p.id + '/responder');
+        const letras = ['a', 'b', 'c', 'd'];
+        let ops = '';
+        letras.forEach(function (l) {
+            ops += '<button type="submit" name="escolha" value="' + l + '" class="quiz-op">' +
+                '<span class="quiz-letra">' + l.toUpperCase() + '</span>' +
+                '<span>' + esc(p['op_' + l]) + '</span></button>';
+        });
+        return '<form class="quiz-card" method="POST" action="' + acao + '">' +
+            '<div class="quiz-selo">Quiz Filosofico</div>' +
+            '<h3 class="quiz-pergunta">' + esc(p.texto) + '</h3>' +
+            '<div class="quiz-ops">' + ops + '</div></form>';
+    }
+
+    function montarResultado(u) {
+        var cls = u.acertou ? 'certo' : 'errado';
+        var titulo = u.acertou ? 'Voce acertou!' : 'Voce errou';
+        return '<div class="quiz-resultado ' + cls + '">' +
+            '<strong>' + titulo + '</strong>' +
+            '<span>' + esc(u.res_texto) + '</span></div>';
+    }
+
+    function atualizarQuiz() {
+        fetch(api, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (data) {
+                if (!data) return;
+                if (data.pendente) {
+                    if (String(data.pendente.id) !== String(ultimoPendenteId)) {
+                        wrap.innerHTML = montarPendente(data.pendente);
+                        ultimoPendenteId = data.pendente.id;
+                    }
+                    return;
+                }
+                // Sem pendente: mostra o ultimo resultado (uma vez).
+                ultimoPendenteId = null;
+                if (data.ultimo && String(data.ultimo.id) !== String(ultimoResultadoId)) {
+                    wrap.innerHTML = montarResultado(data.ultimo);
+                    ultimoResultadoId = data.ultimo.id;
+                } else if (!data.ultimo) {
+                    wrap.innerHTML = '';
+                }
+            })
+            .catch(function () {});
+    }
+
+    atualizarQuiz();
+    setInterval(atualizarQuiz, 4000);
 })();
 </script>
 {% endblock %}

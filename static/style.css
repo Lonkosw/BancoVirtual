@@ -1064,3 +1064,205 @@ select.form-control { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
     * { animation: none !important; transition: none !important; }
 }
+
+/* ============== CLASSE (BURGUES / PROLETARIO) ============== */
+.classe-badge {
+    display: inline-block;
+    margin-left: 0.4rem;
+    padding: 0.1rem 0.5rem;
+    font-size: 0.66rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    vertical-align: middle;
+}
+.classe-jog-burgues    { background: rgba(195, 156, 69, 0.16); color: #ffdf9a; border-color: var(--brass-dim); }
+.classe-jog-proletario { background: rgba(255, 34, 51, 0.14); color: #ff9aa2; border-color: var(--neon-soft); }
+
+/* ============== QUIZ FILOSOFICO (JOGADOR) ============== */
+.quiz-wrap { margin: 1rem 0; }
+.quiz-card {
+    background: linear-gradient(180deg, var(--panel-2), var(--panel));
+    border: 1px solid var(--brass-dim);
+    border-top: 3px solid var(--brass);
+    border-radius: 14px;
+    padding: 1.1rem 1.1rem 1.2rem;
+    box-shadow: 0 0 22px rgba(195, 156, 69, 0.18);
+    animation: revelar 0.4s ease;
+}
+.quiz-selo {
+    display: inline-block;
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--brass);
+    margin-bottom: 0.5rem;
+}
+.quiz-pergunta { color: var(--paper); font-size: 1.1rem; margin-bottom: 0.9rem; line-height: 1.35; }
+.quiz-ops { display: grid; gap: 0.55rem; }
+.quiz-op {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    text-align: left;
+    width: 100%;
+    padding: 0.7rem 0.9rem;
+    background: var(--ground-2);
+    color: var(--paper);
+    border: 1px solid var(--neon-soft);
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 0.95rem;
+    transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+.quiz-op:hover {
+    border-color: var(--neon);
+    background: #2a1210;
+    box-shadow: 0 0 14px var(--neon-glow);
+}
+.quiz-letra {
+    flex: 0 0 auto;
+    width: 1.7rem;
+    height: 1.7rem;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--flag);
+    color: var(--paper);
+    font-weight: 700;
+    font-size: 0.85rem;
+}
+.quiz-resultado {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    padding: 0.9rem 1.1rem;
+    border-radius: 12px;
+    border-left: 4px solid var(--brass);
+    background: linear-gradient(180deg, var(--panel-2), var(--panel));
+    animation: revelar 0.4s ease;
+}
+.quiz-resultado.certo   { border-left-color: #3fae5a; box-shadow: 0 0 16px rgba(63, 174, 90, 0.22); }
+.quiz-resultado.errado  { border-left-color: var(--neon); box-shadow: 0 0 16px var(--neon-glow); }
+.quiz-resultado strong  { color: var(--paper); font-size: 1rem; }
+.quiz-resultado span    { color: var(--paper-dim); font-size: 0.9rem; }
+
+/* ============== GALERIA DE PROPRIEDADES ============== */
+.galeria-intro { color: var(--paper-dim); font-size: 0.88rem; margin-bottom: 0.8rem; }
+.galeria-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 0.8rem;
+}
+.gal-card {
+    background: var(--panel);
+    border: 1px solid var(--blood-2);
+    border-radius: 12px;
+    overflow: hidden;
+}
+.gal-card.hipotecada { opacity: 0.6; }
+.gal-faixa { height: 10px; width: 100%; }
+.gal-corpo { padding: 0.75rem 0.85rem 0.9rem; }
+.gal-topo { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; }
+.gal-topo strong { color: var(--paper); font-size: 1rem; }
+.gal-preco { color: var(--brass); font-weight: 700; font-size: 0.9rem; white-space: nowrap; }
+.gal-estado { font-size: 0.8rem; color: var(--paper-dim); margin: 0.35rem 0 0.5rem; }
+.gal-estado strong { color: var(--paper); }
+.gal-livre { color: #3fae5a; font-weight: 600; }
+.tag-hip { color: var(--neon); font-weight: 700; text-transform: uppercase; font-size: 0.7rem; margin-left: 0.3rem; }
+.gal-alugueis { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.gal-alugueis td { padding: 0.18rem 0; color: var(--paper-dim); border-bottom: 1px solid rgba(92, 12, 15, 0.4); }
+.gal-alugueis td:last-child { text-align: right; color: var(--paper); font-weight: 600; }
+.gal-alugueis tr.gal-hotel td { color: #ffdf9a; }
+.gal-rodape { display: flex; justify-content: space-between; gap: 0.5rem; margin-top: 0.5rem; font-size: 0.74rem; color: var(--paper-dim); }
+
+/* ============== FUNDO DE GREVE ============== */
+.fundo-barra {
+    position: relative;
+    height: 26px;
+    border-radius: 999px;
+    background: var(--ground-2);
+    border: 1px solid var(--blood-2);
+    overflow: hidden;
+    margin-bottom: 0.9rem;
+}
+.fundo-preenchido {
+    height: 100%;
+    background: linear-gradient(90deg, var(--flag), var(--neon));
+    box-shadow: 0 0 14px var(--neon-glow);
+    transition: width 0.4s ease;
+}
+.fundo-label {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--paper);
+    text-shadow: 0 1px 2px rgba(0,0,0,0.7);
+}
+
+/* ============== RANKING DE PATRIMONIO ============== */
+.ranking-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.ranking-row {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.55rem 0.7rem;
+    background: var(--panel);
+    border: 1px solid var(--blood-2);
+    border-radius: 10px;
+}
+.ranking-row.falido { opacity: 0.55; }
+.ranking-pos {
+    flex: 0 0 auto;
+    width: 1.7rem; height: 1.7rem;
+    display: grid; place-items: center;
+    border-radius: 50%;
+    background: var(--ground-2);
+    color: var(--brass);
+    font-weight: 700;
+    border: 1px solid var(--brass-dim);
+}
+.ranking-info { flex: 1; display: flex; align-items: center; gap: 0.3rem; }
+.ranking-info strong { color: var(--paper); }
+.ranking-patr { color: var(--brass); font-weight: 700; white-space: nowrap; }
+
+/* ============== BANNERS DE VITORIA ============== */
+.vitoria-panel { border-top: 3px solid var(--brass); }
+.vitoria-banner {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    padding: 0.8rem 1rem;
+    border-radius: 10px;
+    margin-bottom: 0.5rem;
+    border-left: 4px solid var(--brass);
+    background: linear-gradient(180deg, var(--panel-2), var(--panel));
+}
+.vitoria-banner strong { color: #ffdf9a; text-transform: uppercase; letter-spacing: 0.12em; }
+.vitoria-banner span { color: var(--paper-dim); font-size: 0.88rem; }
+.vitoria-revolucao { border-left-color: var(--neon); box-shadow: 0 0 16px var(--neon-glow); }
+.tab-vitoria { background: var(--neon) !important; color: var(--paper) !important; animation: pulsar 1.1s ease-in-out infinite; }
+
+/* ============== QUIZ RECENTES (ADMIN) ============== */
+.quiz-recentes { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.6rem; }
+.quiz-rec {
+    padding: 0.7rem 0.8rem;
+    background: var(--panel);
+    border: 1px solid var(--blood-2);
+    border-left: 4px solid var(--brass-dim);
+    border-radius: 10px;
+}
+.quiz-rec.certo { border-left-color: #3fae5a; }
+.quiz-rec.errado { border-left-color: var(--neon); }
+.quiz-rec.pendente { border-left-color: var(--brass); }
+.quiz-rec-topo { display: flex; justify-content: space-between; gap: 0.5rem; align-items: baseline; }
+.quiz-rec-topo strong { color: var(--paper); }
+.quiz-rec-status { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--paper-dim); }
+.quiz-rec-pergunta { color: var(--paper-dim); font-size: 0.82rem; margin: 0.35rem 0; }
+.quiz-rec-res { font-size: 0.78rem; color: var(--brass); }

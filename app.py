@@ -12,13 +12,63 @@ import sqlite3
 from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
 
 
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'mude-esta-chave-em-producao')
-app.config['DATABASE'] = os.environ.get('DATABASE', 'banco.db')
+# Caminho absoluto por padrao (evita bancos diferentes em cwd diferentes, ex. PythonAnywhere).
+app.config['DATABASE'] = os.environ.get('DATABASE', os.path.join(BASE_DIR, 'banco.db'))
 app.config['ADMIN_PIN'] = os.environ.get('ADMIN_PIN', '1234')
 BANCO_NOME = '__BANCO__'
 SALDO_BANCO = 999999999.0
-VALOR_PASSOU_INICIO_PADRAO = 200.0
+VALOR_PASSOU_INICIO_PADRAO = 2000.0
+
+# Escala do jogo (milhares). Sugestoes de saldo inicial por classe.
+SALDO_INICIAL_BURGUES = 15000.0
+SALDO_INICIAL_PROLETARIO = 3000.0
+# Renda "da roda" (ao passar pelo inicio) por classe.
+RENDA_BURGUES_PADRAO = 3000.0
+RENDA_PROLETARIO_PADRAO = 2000.0
+# Fundo de Greve e condicoes de vitoria.
+FUNDO_GREVE_META = 30000.0
+VITORIA_HEGEMONIA = 80000.0   # burgues
+VITORIA_ASCENSAO = 20000.0    # proletario
+
+# Versoes de seed: ao mudar, o init_db re-semeia (idempotente).
+SEED_CARTAS_VERSAO = '2'
+SEED_PROPS_VERSAO = '2'
+SEED_QUIZ_VERSAO = '1'
+
+CLASSES_JOGADOR = ('burgues', 'proletario')
+ROTULO_CLASSE_JOGADOR = {
+    'burgues': 'Burgues',
+    'proletario': 'Proletario',
+    None: 'Sem classe',
+    '': 'Sem classe',
+}
+# Baralho puxado por classe do jogador.
+DECK_POR_CLASSE = {
+    'burgues': 'burguesia',
+    'proletario': 'proletariado',
+}
+
+# Eventos de casa (dinheiro automatico por classe). 'burgues'/'proletario' = montante sinalizado.
+# Efeitos de mover/pular vez sao fisicos (o app so aplica o dinheiro).
+EVENTOS_CASA = [
+    ('salario', '21. Receba Salario', 500.0, 500.0),
+    ('promocao', '22. Promocao', 1000.0, 1000.0),
+    ('bonus', '23. Bonus de Producao', 500.0, 500.0),
+    ('dividendos', '24. Dividendos', 1000.0, 1000.0),
+    ('mercado', '25. Mercado em Alta', 500.0, 500.0),
+    ('lucro', '26. Lucro Extra', 1500.0, 1500.0),
+    ('crise', '28. Crise Economica', -1500.0, -500.0),
+    ('greve', '29. Greve Geral', -1000.0, 500.0),
+    ('inflacao', '30. Inflacao', -1000.0, -500.0),
+    ('demissao', '31. Demissao / Falencia', -2500.0, -1000.0),
+    ('impostos', '32. Impostos e Taxas', -2000.0, -1000.0),
+    ('fianca', 'Prisao: pagar fianca', -1000.0, -1000.0),
+]
+EVENTOS_CASA_MAP = {e[0]: e for e in EVENTOS_CASA}
 
 
 # ============== BANCO DE DADOS ==============
@@ -150,12 +200,47 @@ def init_db():
             )
         ''')
 
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS quiz_perguntas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                numero INTEGER NOT NULL,
+                texto TEXT NOT NULL,
+                op_a TEXT NOT NULL,
+                op_b TEXT NOT NULL,
+                op_c TEXT NOT NULL,
+                op_d TEXT NOT NULL,
+                correta TEXT NOT NULL
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS quiz_rodadas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                usuario_id INTEGER NOT NULL,
+                pergunta_id INTEGER NOT NULL,
+                data_hora TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                respondida INTEGER DEFAULT 0,
+                escolha TEXT,
+                acertou INTEGER,
+                res_tipo TEXT,
+                res_valor REAL,
+                res_texto TEXT,
+                respondida_em TIMESTAMP,
+                FOREIGN KEY (usuario_id) REFERENCES usuarios(id),
+                FOREIGN KEY (pergunta_id) REFERENCES quiz_perguntas(id)
+            )
+        ''')
+
         db.commit()
+        # Migracoes de schema primeiro, depois seeds de dados.
         garantir_coluna_falido(db)
+        garantir_coluna_classe(db)
+        garantir_colunas_protecao(db)
         garantir_usuario_banco(db)
         garantir_configuracoes(db)
         garantir_cartas(db)
-        garantir_colunas_protecao(db)
+        garantir_propriedades(db)
+        garantir_quiz(db)
         garantir_indice_nome(db)
         db.close()
         print("Banco de dados inicializado")
@@ -166,6 +251,14 @@ def garantir_coluna_falido(db):
     colunas = db.execute('PRAGMA table_info(usuarios)').fetchall()
     if not any(coluna['name'] == 'falido' for coluna in colunas):
         db.execute('ALTER TABLE usuarios ADD COLUMN falido INTEGER DEFAULT 0')
+        db.commit()
+
+
+def garantir_coluna_classe(db):
+    """Adiciona a coluna 'classe' (burgues/proletario) do jogador."""
+    colunas = db.execute('PRAGMA table_info(usuarios)').fetchall()
+    if not any(coluna['name'] == 'classe' for coluna in colunas):
+        db.execute('ALTER TABLE usuarios ADD COLUMN classe TEXT')
         db.commit()
 
 
@@ -202,17 +295,22 @@ def obter_banco_id(db):
 
 
 def garantir_configuracoes(db):
-    existente = db.execute(
-        'SELECT valor FROM configuracoes WHERE chave = ?',
-        ('valor_passou_inicio',)
-    ).fetchone()
-
-    if not existente:
-        db.execute(
-            'INSERT INTO configuracoes (chave, valor) VALUES (?, ?)',
-            ('valor_passou_inicio', str(VALOR_PASSOU_INICIO_PADRAO))
-        )
-        db.commit()
+    padroes = {
+        'valor_passou_inicio': VALOR_PASSOU_INICIO_PADRAO,
+        'renda_burgues': RENDA_BURGUES_PADRAO,
+        'renda_proletario': RENDA_PROLETARIO_PADRAO,
+        'fundo_greve': 0.0,
+    }
+    for chave, valor in padroes.items():
+        existente = db.execute(
+            'SELECT 1 FROM configuracoes WHERE chave = ?', (chave,)
+        ).fetchone()
+        if not existente:
+            db.execute(
+                'INSERT INTO configuracoes (chave, valor) VALUES (?, ?)',
+                (chave, str(valor))
+            )
+    db.commit()
 
 
 def obter_config_float(db, chave, padrao):
@@ -236,14 +334,14 @@ def salvar_config(db, chave, valor):
 
 def obter_jogador(db, usuario_id):
     return db.execute(
-        'SELECT id, nome, saldo, criado_em, falido FROM usuarios WHERE id = ? AND nome != ?',
+        'SELECT id, nome, saldo, criado_em, falido, classe FROM usuarios WHERE id = ? AND nome != ?',
         (usuario_id, BANCO_NOME)
     ).fetchone()
 
 
 def listar_jogadores(db):
     return db.execute(
-        'SELECT id, nome, saldo, criado_em, falido FROM usuarios WHERE nome != ? ORDER BY nome',
+        'SELECT id, nome, saldo, criado_em, falido, classe FROM usuarios WHERE nome != ? ORDER BY nome',
         (BANCO_NOME,)
     ).fetchall()
 
@@ -269,6 +367,51 @@ def normalizar_nome(nome):
 # ============== PROPRIEDADES ==============
 
 NIVEL_HOTEL = 5  # nivel 0 = terreno puro, 1-4 = casas, 5 = hotel
+
+# Cores dos grupos (usadas como fundo no template).
+GRUPO_MARROM = '#8d5a2b'
+GRUPO_AZUL = '#2f74d0'
+GRUPO_VERMELHO = '#c0392b'
+GRUPO_DOURADO = '#d4af37'
+
+# (nome, grupo, posicao, preco_compra, custo_casa, valor_hipoteca, alugueis[0..5])
+# alugueis: nivel 0 = terreno, 1-4 = casas, 5 = hotel. Escala em milhares.
+PROPRIEDADES_SEED = [
+    ('Fazenda', GRUPO_MARROM, 14, 1000.0, 500.0, 500.0, [60, 300, 900, 2700, 4000, 5500]),
+    ('Comercio', GRUPO_MARROM, 15, 1200.0, 500.0, 600.0, [80, 400, 1000, 3000, 4500, 6000]),
+    ('Fabrica', GRUPO_AZUL, 13, 1600.0, 800.0, 800.0, [120, 600, 1800, 5000, 7000, 9000]),
+    ('Industria', GRUPO_AZUL, 19, 2000.0, 800.0, 1000.0, [160, 800, 2200, 6000, 8000, 10000]),
+    ('Construtora', GRUPO_VERMELHO, 20, 2600.0, 1200.0, 1300.0, [220, 1100, 3300, 8000, 11000, 14000]),
+    ('Shopping Center', GRUPO_VERMELHO, 18, 3000.0, 1200.0, 1500.0, [260, 1300, 3900, 9000, 12500, 15500]),
+    ('Banco Privado', GRUPO_DOURADO, 17, 3500.0, 1500.0, 1750.0, [350, 1750, 5000, 11000, 14000, 18000]),
+    ('Empresa de Tecnologia', GRUPO_DOURADO, 16, 4000.0, 1500.0, 2000.0, [500, 2000, 6000, 14000, 17000, 21000]),
+]
+
+
+def garantir_propriedades(db):
+    """Semeia (ou re-semeia ao mudar a versao) as propriedades e a tabela de alugueis."""
+    versao = db.execute(
+        'SELECT valor FROM configuracoes WHERE chave = ?', ('seed_props_v',)
+    ).fetchone()
+    total = db.execute('SELECT COUNT(*) AS c FROM propriedades').fetchone()['c']
+    if total and versao and versao['valor'] == SEED_PROPS_VERSAO:
+        return
+
+    db.execute('DELETE FROM alugueis')
+    db.execute('DELETE FROM propriedades')
+    for (nome, grupo, posicao, preco, custo_casa, hipoteca, alugueis) in PROPRIEDADES_SEED:
+        cur = db.execute('''
+            INSERT INTO propriedades (nome, grupo, posicao, preco_compra, custo_casa, valor_hipoteca)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (nome, grupo, posicao, preco, custo_casa, hipoteca))
+        prop_id = cur.lastrowid
+        for nivel, valor in enumerate(alugueis):
+            db.execute(
+                'INSERT INTO alugueis (propriedade_id, nivel, valor) VALUES (?, ?, ?)',
+                (prop_id, nivel, float(valor))
+            )
+    salvar_config(db, 'seed_props_v', SEED_PROPS_VERSAO)
+    db.commit()
 
 
 def nivel_construcao(prop):
@@ -371,85 +514,87 @@ def rotulo_nivel(prop):
 
 # ============== CARTAS (SORTE / REVES) ==============
 
-# (classe, numero, titulo, texto, valor, percentual)
+# (classe, numero, titulo, texto, valor, percentual, guardavel)
 # valor: montante imediato no caixa (+ receber / - pagar). None = sem dinheiro automatico.
-# percentual: fracao do saldo a pagar (ex: 0.20). Cartas sem valor/percentual sao so exibicao;
-# a parte de mover/pular turno/etc. o jogador executa no tabuleiro fisico pelo texto.
+# percentual: fracao do saldo a pagar (ex: 0.20). guardavel=1 = carta de protecao (inventario).
+# Escala em milhares (start 15.000/3.000; vitorias 80.000/20.000).
 CARTAS_SEED = [
-    # ----- BURGUESIA -----
-    ('burguesia', 1, 'Leitura do Testamento',
-     'Seu avo era um grande latifundiario e deixou parte da fortuna para voce. Receba 1 propriedade agricola aleatoria gratuitamente.', None, None),
-    ('burguesia', 2, 'Escola Bilingue Privada', 'Pague $500 e avance 2 casas.', -500.0, None),
-    ('burguesia', 3, 'Estagio na Empresa do Pai', 'Receba $1.000.', 1000.0, None),
-    ('burguesia', 4, 'Carro Importado de Presente', 'Avance 3 casas.', None, None),
-    ('burguesia', 5, 'Recebendo as Acoes da Familia', 'Passe pela largada: +$1.500.', 1500.0, None),
-    ('burguesia', 6, 'Compra de Titulos Publicos', 'Pague $2.000. Receba +$300 por largada.', -2000.0, None),
-    ('burguesia', 7, 'Isencao Fiscal Governamental', 'Nao pague impostos por 2 voltas.', None, None),
-    ('burguesia', 8, 'Aquisicao de Industria Textil', 'Pague $5.000. Receba $1.000 ao passar.', -5000.0, None),
-    ('burguesia', 9, 'Fusao de Empresas', 'Dobre o aluguel de uma propriedade.', None, None),
-    ('burguesia', 10, 'Condominio de Luxo', 'Compre imovel por $4.500. Aluguel $1.200.', None, None),
-    ('burguesia', 11, 'Investimento em Startup', 'Pague $1.500. Proxima largada: $3.000.', -1500.0, None),
-    ('burguesia', 12, 'Lobby Bem-Sucedido', 'Receba $2.000.', 2000.0, None),
-    ('burguesia', 13, 'Expansao Internacional', 'Avance ate a proxima propriedade e receba $1.000.', 1000.0, None),
-    ('burguesia', 14, 'Processo Trabalhista Comum', 'Pague $700.', -700.0, None),
-    ('burguesia', 15, 'Flutuacao Cambial', 'Pague $500.', -500.0, None),
-    ('burguesia', 16, 'Auditoria da Receita Federal', 'Pague 20% do dinheiro.', None, 0.20),
-    ('burguesia', 17, 'Escandalo de Compliance', 'Pague $4.000 e fique 2 rodadas sem alugueis.', -4000.0, None),
-    ('burguesia', 18, 'Quebra da Bolha Especulativa', 'Propriedades perdem metade do valor.', None, None),
-    ('burguesia', 19, 'Privatizacao Fracassada', 'Pague $1.500.', -1500.0, None),
-    ('burguesia', 20, 'Crise Economica', 'Nao receba alugueis por 1 rodada.', None, None),
-    # ----- PROLETARIADO -----
-    ('proletariado', 1, 'Trabalho Infantil / Jovem Aprendiz', 'Receba $200.', 200.0, None),
-    ('proletariado', 2, 'Promocao por Tempo de Servico', '+ $500 permanente na largada.', None, None),
-    ('proletariado', 3, 'Bico Altamente Lucrativo', 'Receba $800 e avance 1 casa.', 800.0, None),
-    ('proletariado', 4, 'Bolsa de Estudos Integral', 'Receba $5.000 e avance 5 casas.', 5000.0, None),
-    ('proletariado', 5, 'Consciencia de Classe / Sindicato', 'Ganhe uma carta de protecao.', None, None),
-    ('proletariado', 6, 'Mutirao da Comunidade', 'Receba $800.', 800.0, None),
-    ('proletariado', 7, 'Concurso Publico', '+ $500 permanente na largada.', None, None),
-    ('proletariado', 8, 'Curso Tecnico Gratuito', 'Avance 3 casas e receba $300.', 300.0, None),
-    ('proletariado', 9, 'Decimo Terceiro Salario', 'Receba $1.000.', 1000.0, None),
-    ('proletariado', 10, 'Cooperativa de Trabalhadores', 'Receba $1.500 e ignore o proximo aluguel.', 1500.0, None),
-    ('proletariado', 11, 'Falecimento do Pai', 'Pague $600 e $100 nas proximas 5 largadas.', -600.0, None),
-    ('proletariado', 12, 'Escola Publica Sucateada', 'Volte 2 casas.', None, None),
-    ('proletariado', 13, 'Faculdade Noturna', 'Pague $300 por 5 rodadas.', None, None),
-    ('proletariado', 14, 'Estagio Nao Remunerado', 'Fique uma rodada sem salario.', None, None),
-    ('proletariado', 15, 'Pane no Onibus', 'Pague $100 ou perca a vez.', None, None),
-    ('proletariado', 16, 'Desemprego de Longa Duracao', 'Fique 1 rodada sem jogar.', None, None),
-    ('proletariado', 17, 'Demissao por Reestruturacao', 'Pague $400 e perca o proximo salario.', -400.0, None),
-    ('proletariado', 18, 'Inflacao do Supermercado', 'Pague $350.', -350.0, None),
-    ('proletariado', 19, 'Burnout', 'Fique 2 rodadas sem jogar.', None, None),
-    ('proletariado', 20, 'Enchente na Periferia', 'Pague $1.200 ou fique 3 rodadas sem jogar.', None, None),
-    # ----- RARAS -----
-    ('rara', 1, 'Heranca Bilionaria', 'Receba $8.000 e avance ate a proxima propriedade.', 8000.0, None),
-    ('rara', 2, 'Influencia Politica', 'Ignore uma penalidade.', None, None),
-    ('rara', 3, 'Indenizacao Trabalhista', 'Receba $2.000.', 2000.0, None),
-    ('rara', 4, 'Viralizou na Internet', 'Receba $3.000 e avance 5 casas.', 3000.0, None),
-    ('rara', 5, 'Ascensao Social', 'Receba $10.000 e escolha migrar para a burguesia ou permanecer.', 10000.0, None),
+    # ----- BURGUESIA (o dono do capital: dividendos, exploracao, mas tambem impostos e crises) -----
+    ('burguesia', 1, 'Lucro Trimestral Recorde', 'A empresa bateu recorde de lucros. Receba R$ 2.000.', 2000.0, None, 0),
+    ('burguesia', 2, 'Sonegacao Bem-Sucedida', 'Voce escondeu receita do fisco. Receba R$ 1.500.', 1500.0, None, 0),
+    ('burguesia', 3, 'Heranca de Familia', 'Um parente latifundiario faleceu. Receba R$ 3.000.', 3000.0, None, 0),
+    ('burguesia', 4, 'Paraiso Fiscal', 'Guarde esta carta: use para anular uma cobranca futura do Estado.', None, None, 1),
+    ('burguesia', 5, 'Especulacao Imobiliaria', 'Voce vendeu terras na alta. Receba R$ 2.500.', 2500.0, None, 0),
+    ('burguesia', 6, 'Corte de Custos', 'Voce demitiu metade do setor. Receba R$ 1.000.', 1000.0, None, 0),
+    ('burguesia', 7, 'Dividendos de Acoes', 'Sua carteira rendeu. Receba R$ 1.500.', 1500.0, None, 0),
+    ('burguesia', 8, 'Auditoria da Receita', 'O leao veio atras do seu capital. Pague 20% do seu saldo.', None, 0.20, 0),
+    ('burguesia', 9, 'Multa Trabalhista', 'Condenado por assedio moral. Pague R$ 1.500.', -1500.0, None, 0),
+    ('burguesia', 10, 'Greve dos Operarios', 'A producao parou. Pague R$ 2.000 de prejuizo.', -2000.0, None, 0),
+    ('burguesia', 11, 'Escandalo de Corrupcao', 'Seu nome vazou na imprensa. Pague R$ 2.500.', -2500.0, None, 0),
+    ('burguesia', 12, 'Crise Financeira', 'A bolha estourou. Pague R$ 3.000.', -3000.0, None, 0),
+    ('burguesia', 13, 'Propina a Fiscal', 'Para abafar a denuncia. Pague R$ 500.', -500.0, None, 0),
+    ('burguesia', 14, 'Bonus de Diretoria', 'O conselho aprovou seu bonus. Receba R$ 1.000.', 1000.0, None, 0),
+    ('burguesia', 15, 'Terceirizacao Lucrativa', 'Voce cortou direitos e lucrou. Receba R$ 1.500.', 1500.0, None, 0),
+    ('burguesia', 16, 'Imposto sobre Grandes Fortunas', 'O Estado cobrou os ricos. Pague R$ 2.000.', -2000.0, None, 0),
+    ('burguesia', 17, 'Planejamento Tributario', 'Guarde esta carta: use para evitar pagar um imposto ou multa.', None, None, 1),
+    ('burguesia', 18, 'Fraude Descoberta', 'A auditoria achou o rombo. Pague R$ 1.500.', -1500.0, None, 0),
+    ('burguesia', 19, 'Monopolio de Mercado', 'Voce engoliu a concorrencia. Receba R$ 3.000.', 3000.0, None, 0),
+    ('burguesia', 20, 'Fuga de Capitais', 'Voce mandou dinheiro para fora e perdeu no cambio. Pague 10% do saldo.', None, 0.10, 0),
+    # ----- PROLETARIADO (quem vive do trabalho: ganhos pequenos, solidariedade, mas contas apertadas) -----
+    ('proletariado', 1, 'Decimo Terceiro Salario', 'O direito garantido em lei. Receba R$ 1.000.', 1000.0, None, 0),
+    ('proletariado', 2, 'Hora Extra Paga', 'Voce dobrou o turno. Receba R$ 500.', 500.0, None, 0),
+    ('proletariado', 3, 'Premio de Producao', 'A meta foi batida. Receba R$ 700.', 700.0, None, 0),
+    ('proletariado', 4, 'FGTS Sacado', 'Voce liberou o fundo de garantia. Receba R$ 1.200.', 1200.0, None, 0),
+    ('proletariado', 5, 'Bico no Fim de Semana', 'Um trampo extra caiu. Receba R$ 400.', 400.0, None, 0),
+    ('proletariado', 6, 'Restituicao do Imposto de Renda', 'A malha fina te devolveu. Receba R$ 600.', 600.0, None, 0),
+    ('proletariado', 7, 'Auxilio Emergencial', 'O Estado pagou o beneficio. Receba R$ 1.000.', 1000.0, None, 0),
+    ('proletariado', 8, 'Rateio da Cooperativa', 'A cooperativa dividiu as sobras. Receba R$ 800.', 800.0, None, 0),
+    ('proletariado', 9, 'Conta de Luz Atrasada', 'Vieram os juros. Pague R$ 500.', -500.0, None, 0),
+    ('proletariado', 10, 'Remedio Caro na Farmacia', 'Sem farmacia popular por perto. Pague R$ 700.', -700.0, None, 0),
+    ('proletariado', 11, 'Aluguel Reajustado', 'O locador aumentou de novo. Pague R$ 800.', -800.0, None, 0),
+    ('proletariado', 12, 'Cesta Basica nas Alturas', 'A inflacao comeu o salario. Pague R$ 400.', -400.0, None, 0),
+    ('proletariado', 13, 'Conserto do Transporte', 'O onibus/carro quebrou. Pague R$ 600.', -600.0, None, 0),
+    ('proletariado', 14, 'Emprestimo no Agiota', 'A divida virou bola de neve. Pague R$ 1.000.', -1000.0, None, 0),
+    ('proletariado', 15, 'Multa por Atraso', 'O carne venceu. Pague R$ 300.', -300.0, None, 0),
+    ('proletariado', 16, 'Acidente de Trabalho sem Seguro', 'O patrao nao registrou. Pague R$ 900.', -900.0, None, 0),
+    ('proletariado', 17, 'Passe Livre Estudantil', 'Transporte garantido. Receba R$ 300.', 300.0, None, 0),
+    ('proletariado', 18, 'Mutirao de Reforma', 'A vizinhanca ajudou na obra. Receba R$ 500.', 500.0, None, 0),
+    ('proletariado', 19, 'Fura-Greve Descoberto', 'Voce perdeu o apoio dos colegas. Pague R$ 700.', -700.0, None, 0),
+    ('proletariado', 20, 'Comunidade Solidaria', 'Guarde esta carta: a comunidade paga uma divida sua no futuro.', None, None, 1),
 ]
 
-CLASSES_VALIDAS = ('burguesia', 'proletariado', 'rara')
+CLASSES_VALIDAS = ('burguesia', 'proletariado')
 
 ROTULO_CLASSE = {
     'burguesia': 'Burguesia',
     'proletariado': 'Proletariado',
-    'rara': 'Rara',
 }
 
 
 def garantir_cartas(db):
-    """Semeia as cartas e o baralho apenas se ainda nao existirem."""
+    """Semeia (ou re-semeia ao mudar a versao) as cartas e o baralho, idempotente."""
+    versao = db.execute(
+        'SELECT valor FROM configuracoes WHERE chave = ?', ('seed_cartas_v',)
+    ).fetchone()
     total = db.execute('SELECT COUNT(*) AS c FROM cartas').fetchone()['c']
-    if total:
+    if total and versao and versao['valor'] == SEED_CARTAS_VERSAO:
         return
-    for (classe, numero, titulo, texto, valor, percentual) in CARTAS_SEED:
+
+    # Re-seed: limpa cartas/baralho/historico e recarrega na versao atual.
+    db.execute('DELETE FROM cartas_tiradas')
+    db.execute('DELETE FROM baralho')
+    db.execute('DELETE FROM cartas')
+    for (classe, numero, titulo, texto, valor, percentual, guardavel) in CARTAS_SEED:
         cur = db.execute(
-            'INSERT INTO cartas (classe, numero, titulo, texto, valor, percentual) VALUES (?, ?, ?, ?, ?, ?)',
-            (classe, numero, titulo, texto, valor, percentual)
+            'INSERT INTO cartas (classe, numero, titulo, texto, valor, percentual, guardavel) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (classe, numero, titulo, texto, valor, percentual, guardavel)
         )
         db.execute(
             'INSERT INTO baralho (classe, carta_id, usada) VALUES (?, ?, 0)',
             (classe, cur.lastrowid)
         )
+    salvar_config(db, 'seed_cartas_v', SEED_CARTAS_VERSAO)
     db.commit()
 
 
@@ -482,32 +627,26 @@ def carta_tem_dinheiro(carta):
     return carta['valor'] is not None or carta['percentual'] is not None
 
 
-def aplicar_valor_carta(db, usuario_id, carta, banco_id):
-    """Aplica a parte de dinheiro da carta no caixa. Retorna o valor efetivo (sinalizado).
+def aplicar_montante(db, usuario_id, montante, banco_id, descricao, motivo_falencia='Falencia'):
+    """Credita (montante > 0) ou cobra (montante < 0) do caixa. Retorna o efetivo sinalizado.
 
-    Recebimento credita do Estado. Pagamento maior que o saldo vende os bens do jogador
+    Recebimento credita do Estado. Cobranca maior que o saldo vende os bens do jogador
     (mesmo fluxo de falencia do aluguel) e, se ainda faltar, decreta falencia.
     """
     row = db.execute('SELECT saldo FROM usuarios WHERE id = ?', (usuario_id,)).fetchone()
     saldo = float(row['saldo']) if row else 0.0
 
-    if carta['percentual'] is not None:
-        montante = -(saldo * float(carta['percentual']))
-    elif carta['valor'] is not None:
-        montante = float(carta['valor'])
-    else:
+    if montante == 0:
         return 0.0
 
-    descricao = f'Carta: {carta["titulo"]}'
-
-    if montante >= 0:
+    if montante > 0:
         db.execute('UPDATE usuarios SET saldo = saldo + ? WHERE id = ?', (montante, usuario_id))
         registrar_movimento(db, banco_id, usuario_id, montante, descricao)
         return montante
 
     pagar = -montante
     if saldo < pagar:
-        saldo += liquidar_todas_propriedades(db, usuario_id, banco_id, 'Falencia (carta)')
+        saldo += liquidar_todas_propriedades(db, usuario_id, banco_id, motivo_falencia)
 
     if saldo >= pagar:
         db.execute('UPDATE usuarios SET saldo = saldo - ? WHERE id = ?', (pagar, usuario_id))
@@ -519,6 +658,24 @@ def aplicar_valor_carta(db, usuario_id, carta, banco_id):
         registrar_movimento(db, usuario_id, banco_id, resto, descricao + ' (falencia)')
     db.execute('UPDATE usuarios SET saldo = 0, falido = 1 WHERE id = ?', (usuario_id,))
     return -resto
+
+
+def aplicar_valor_carta(db, usuario_id, carta, banco_id):
+    """Aplica a parte de dinheiro da carta no caixa. Retorna o valor efetivo (sinalizado)."""
+    row = db.execute('SELECT saldo FROM usuarios WHERE id = ?', (usuario_id,)).fetchone()
+    saldo = float(row['saldo']) if row else 0.0
+
+    if carta['percentual'] is not None:
+        montante = -(saldo * float(carta['percentual']))
+    elif carta['valor'] is not None:
+        montante = float(carta['valor'])
+    else:
+        return 0.0
+
+    return aplicar_montante(
+        db, usuario_id, montante, banco_id,
+        f'Carta: {carta["titulo"]}', 'Falencia (carta)'
+    )
 
 
 def cartas_do_jogador(db, usuario_id, limite=15):
@@ -557,13 +714,7 @@ def garantir_colunas_protecao(db):
         db.execute('ALTER TABLE cartas_tiradas ADD COLUMN protecao_usada INTEGER DEFAULT 0')
     if 'protecao_usada_em' not in colunas_tiradas:
         db.execute('ALTER TABLE cartas_tiradas ADD COLUMN protecao_usada_em TIMESTAMP')
-
-    # Marca as cartas guardaveis (idempotente): Sindicato e Influencia Politica.
-    db.execute('''
-        UPDATE cartas SET guardavel = 1
-        WHERE (classe = 'proletariado' AND numero = 5)
-           OR (classe = 'rara' AND numero = 2)
-    ''')
+    # As cartas guardaveis ja sao marcadas no proprio CARTAS_SEED (coluna guardavel).
     db.commit()
 
 
@@ -600,6 +751,205 @@ def protecoes_usadas_recentes(db, limite=10):
         JOIN usuarios u ON ct.usuario_id = u.id
         WHERE ct.protecao_usada = 1
         ORDER BY ct.protecao_usada_em DESC, ct.id DESC
+        LIMIT ?
+    ''', (limite,)).fetchall()
+
+
+# ============== FUNDO DE GREVE / PATRIMONIO / VITORIA ==============
+
+def obter_fundo_greve(db):
+    return obter_config_float(db, 'fundo_greve', 0.0)
+
+
+def calcular_patrimonio(db):
+    """Patrimonio = saldo + preco_compra das propriedades + construcoes x custo_casa.
+
+    Retorna a lista de jogadores ordenada por patrimonio (desc).
+    """
+    jogadores = db.execute(
+        'SELECT id, nome, saldo, classe, falido FROM usuarios WHERE nome != ? ORDER BY nome',
+        (BANCO_NOME,)
+    ).fetchall()
+    props = db.execute(
+        'SELECT dono_id, preco_compra, custo_casa, num_casas, tem_hotel '
+        'FROM propriedades WHERE dono_id IS NOT NULL'
+    ).fetchall()
+
+    por_dono = {}
+    for p in props:
+        valor = float(p['preco_compra']) + unidades_construidas(p) * float(p['custo_casa'])
+        por_dono[p['dono_id']] = por_dono.get(p['dono_id'], 0.0) + valor
+
+    ranking = []
+    for j in jogadores:
+        patrimonio = float(j['saldo']) + por_dono.get(j['id'], 0.0)
+        ranking.append({
+            'id': j['id'],
+            'nome': j['nome'],
+            'classe': j['classe'],
+            'classe_rotulo': ROTULO_CLASSE_JOGADOR.get(j['classe'], 'Sem classe'),
+            'falido': j['falido'],
+            'saldo': float(j['saldo']),
+            'patrimonio': patrimonio,
+        })
+    ranking.sort(key=lambda x: x['patrimonio'], reverse=True)
+    return ranking
+
+
+def condicoes_vitoria(db, ranking, fundo):
+    """Sinaliza vencedores segundo as condicoes do jogo (nao bloqueia a partida)."""
+    vencedores = []
+    for r in ranking:
+        if r['falido']:
+            continue
+        if r['classe'] == 'burgues' and r['patrimonio'] >= VITORIA_HEGEMONIA:
+            vencedores.append({'tipo': 'Hegemonia', 'quem': r['nome'],
+                               'detalhe': f'Patrimonio R$ {r["patrimonio"]:.0f}'})
+        if r['classe'] == 'proletario' and r['patrimonio'] >= VITORIA_ASCENSAO:
+            vencedores.append({'tipo': 'Ascensao', 'quem': r['nome'],
+                               'detalhe': f'Patrimonio R$ {r["patrimonio"]:.0f}'})
+    if fundo >= FUNDO_GREVE_META:
+        vencedores.append({'tipo': 'Revolucao', 'quem': 'Todos os proletarios',
+                           'detalhe': 'Fundo de Greve completo'})
+    return vencedores
+
+
+def alugueis_por_propriedade(db):
+    """Mapa propriedade_id -> {nivel: valor} para a galeria (1 query)."""
+    rows = db.execute('SELECT propriedade_id, nivel, valor FROM alugueis').fetchall()
+    mapa = {}
+    for r in rows:
+        mapa.setdefault(r['propriedade_id'], {})[r['nivel']] = float(r['valor'])
+    return mapa
+
+
+# ============== QUIZ FILOSOFICO ==============
+
+# (numero, texto, op_a, op_b, op_c, op_d, correta)
+QUIZ_SEED = [
+    (1, 'O que gera a "mais-valia" para Marx?',
+     'O lucro dos bancos', 'O trabalho nao pago do trabalhador',
+     'A impressao de dinheiro', 'A sorte no mercado', 'b'),
+    (2, 'Quem e o "proletariado"?',
+     'Os donos das fabricas', 'Quem vive da venda da sua forca de trabalho',
+     'Os agricultores', 'O governo', 'b'),
+    (3, 'Quem e a "burguesia"?',
+     'Quem detem os meios de producao', 'Os trabalhadores urbanos',
+     'Os camponeses', 'Os estudantes', 'a'),
+    (4, '"A historia de todas as sociedades ate hoje e a historia da..."',
+     'Luta de classes', 'Evolucao tecnologica', 'Religiao', 'Guerra entre nacoes', 'a'),
+    (5, 'O que sao "meios de producao"?',
+     'O salario', 'Fabricas, maquinas, terra e ferramentas',
+     'Os impostos', 'As mercadorias no mercado', 'b'),
+    (6, 'Quem escreveu o "Manifesto Comunista" com Marx?',
+     'Lenin', 'Friedrich Engels', 'Adam Smith', 'Hegel', 'b'),
+    (7, 'O que e "consciencia de classe"?',
+     'Saber gastar', 'O trabalhador reconhecer seus interesses comuns como classe',
+     'A consciencia do patrao', 'Um imposto', 'b'),
+    (8, 'O valor de uma mercadoria vem, para Marx, de:',
+     'Sua cor', 'Do trabalho socialmente necessario para produzi-la',
+     'Da propaganda', 'Do humor do vendedor', 'b'),
+    (9, 'O que e "alienacao" do trabalho?',
+     'O trabalhador se separar do produto e do sentido do seu trabalho',
+     'Ficar doente', 'Trabalhar de casa', 'Ser demitido', 'a'),
+    (10, '"De cada um segundo suas capacidades, a cada um segundo suas..."',
+     'Vontades', 'Necessidades', 'Posses', 'Horas trabalhadas', 'b'),
+    (11, 'O que a burguesia acumula ao explorar o trabalho?',
+     'Capital', 'Votos', 'So terras', 'Conhecimento', 'a'),
+    (12, 'A greve e uma ferramenta de qual classe?',
+     'Da burguesia', 'Da classe trabalhadora', 'Dos banqueiros', 'Do Estado', 'b'),
+]
+
+# Buffs (acerto) e debuffs. tipo: 'dinheiro' aplica no caixa; 'protecao' concede carta; 'texto' e manual.
+QUIZ_BUFFS = [
+    ('dinheiro', 1000.0, '+R$ 1.000'),
+    ('dinheiro', 2000.0, '+R$ 2.000'),
+    ('protecao', None, 'Ganhou 1 carta de protecao'),
+    ('dinheiro', 500.0, '+R$ 500'),
+]
+QUIZ_DEBUFFS = [
+    ('dinheiro', -500.0, '-R$ 500'),
+    ('dinheiro', -1000.0, '-R$ 1.000'),
+    ('texto', None, 'Volte 1 casa (cumpra no tabuleiro)'),
+    ('texto', None, 'Perca a vez (cumpra no tabuleiro)'),
+]
+
+
+def garantir_quiz(db):
+    """Semeia (ou re-semeia ao mudar a versao) as perguntas do quiz."""
+    versao = db.execute(
+        'SELECT valor FROM configuracoes WHERE chave = ?', ('seed_quiz_v',)
+    ).fetchone()
+    total = db.execute('SELECT COUNT(*) AS c FROM quiz_perguntas').fetchone()['c']
+    if total and versao and versao['valor'] == SEED_QUIZ_VERSAO:
+        return
+
+    db.execute('DELETE FROM quiz_rodadas')
+    db.execute('DELETE FROM quiz_perguntas')
+    for (numero, texto, a, b, c, d, correta) in QUIZ_SEED:
+        db.execute('''
+            INSERT INTO quiz_perguntas (numero, texto, op_a, op_b, op_c, op_d, correta)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (numero, texto, a, b, c, d, correta))
+    salvar_config(db, 'seed_quiz_v', SEED_QUIZ_VERSAO)
+    db.commit()
+
+
+def sortear_resultado_quiz(acertou):
+    """Acerto: 75% buff / 25% debuff. Erro: sempre debuff. Retorna (tipo, valor, texto)."""
+    if acertou and random.random() < 0.75:
+        return random.choice(QUIZ_BUFFS)
+    return random.choice(QUIZ_DEBUFFS)
+
+
+def conceder_protecao(db, usuario_id):
+    """Concede ao jogador uma carta de protecao (guardavel) do acervo."""
+    carta = db.execute(
+        'SELECT id, titulo FROM cartas WHERE guardavel = 1 ORDER BY RANDOM() LIMIT 1'
+    ).fetchone()
+    if not carta:
+        return None
+    db.execute(
+        'INSERT INTO cartas_tiradas (carta_id, usuario_id) VALUES (?, ?)',
+        (carta['id'], usuario_id)
+    )
+    return carta['titulo']
+
+
+def quiz_pendente_do_jogador(db, usuario_id):
+    """Quiz enviado ao jogador e ainda nao respondido (o mais recente)."""
+    return db.execute('''
+        SELECT r.id, q.numero, q.texto, q.op_a, q.op_b, q.op_c, q.op_d
+        FROM quiz_rodadas r
+        JOIN quiz_perguntas q ON r.pergunta_id = q.id
+        WHERE r.usuario_id = ? AND r.respondida = 0
+        ORDER BY r.id DESC
+        LIMIT 1
+    ''', (usuario_id,)).fetchone()
+
+
+def ultimo_quiz_resultado(db, usuario_id):
+    """Resultado do ultimo quiz respondido (para exibir no dashboard)."""
+    return db.execute('''
+        SELECT r.id, r.acertou, r.res_tipo, r.res_valor, r.res_texto, r.escolha,
+               q.texto, q.correta
+        FROM quiz_rodadas r
+        JOIN quiz_perguntas q ON r.pergunta_id = q.id
+        WHERE r.usuario_id = ? AND r.respondida = 1
+        ORDER BY r.id DESC
+        LIMIT 1
+    ''', (usuario_id,)).fetchone()
+
+
+def listar_quiz_recentes(db, limite=15):
+    """Rodadas de quiz recentes (para o painel do banco)."""
+    return db.execute('''
+        SELECT r.id, r.respondida, r.acertou, r.res_texto, r.escolha, r.data_hora,
+               u.nome AS jogador, q.numero, q.texto
+        FROM quiz_rodadas r
+        JOIN usuarios u ON r.usuario_id = u.id
+        JOIN quiz_perguntas q ON r.pergunta_id = q.id
+        ORDER BY r.id DESC
         LIMIT ?
     ''', (limite,)).fetchall()
 
@@ -731,6 +1081,19 @@ def dashboard():
 
     minhas_cartas = cartas_do_jogador(db, session['usuario_id'])
     minhas_protecoes = protecoes_do_jogador(db, session['usuario_id'])
+
+    # Galeria: todas as propriedades com tabela de alugueis e estado ao vivo.
+    mapa_alugueis = alugueis_por_propriedade(db)
+    galeria = []
+    for p in listar_propriedades(db):
+        item = dict(p)
+        nivel_map = mapa_alugueis.get(p['id'], {})
+        item['alugueis'] = [nivel_map.get(n, 0.0) for n in range(6)]
+        item['nivel_texto'] = rotulo_nivel(p)
+        galeria.append(item)
+
+    quiz_pendente = quiz_pendente_do_jogador(db, session['usuario_id'])
+    quiz_ultimo = ultimo_quiz_resultado(db, session['usuario_id'])
     db.close()
 
     return render_template(
@@ -741,7 +1104,11 @@ def dashboard():
         minhas_propriedades=minhas_propriedades,
         minhas_cartas=minhas_cartas,
         minhas_protecoes=minhas_protecoes,
-        rotulo_classe=ROTULO_CLASSE
+        rotulo_classe=ROTULO_CLASSE,
+        classe_rotulo=ROTULO_CLASSE_JOGADOR.get(usuario['classe'], 'Sem classe'),
+        galeria=galeria,
+        quiz_pendente=quiz_pendente,
+        quiz_ultimo=quiz_ultimo
     )
 
 
@@ -933,6 +1300,14 @@ def admin_dashboard():
     cartas_recentes = listar_cartas_tiradas(db)
     protecoes_posse = jogadores_com_protecao(db)
     protecoes_usadas = protecoes_usadas_recentes(db)
+
+    renda_burgues = obter_config_float(db, 'renda_burgues', RENDA_BURGUES_PADRAO)
+    renda_proletario = obter_config_float(db, 'renda_proletario', RENDA_PROLETARIO_PADRAO)
+    fundo_greve = obter_fundo_greve(db)
+    fundo_pct = min(100.0, (fundo_greve / FUNDO_GREVE_META * 100.0) if FUNDO_GREVE_META else 0.0)
+    ranking = calcular_patrimonio(db)
+    vencedores = condicoes_vitoria(db, ranking, fundo_greve)
+    quiz_recentes = listar_quiz_recentes(db)
     db.close()
 
     return render_template(
@@ -948,7 +1323,17 @@ def admin_dashboard():
         cartas_recentes=cartas_recentes,
         protecoes_posse=protecoes_posse,
         protecoes_usadas=protecoes_usadas,
-        rotulo_classe=ROTULO_CLASSE
+        rotulo_classe=ROTULO_CLASSE,
+        rotulo_classe_jogador=ROTULO_CLASSE_JOGADOR,
+        renda_burgues=renda_burgues,
+        renda_proletario=renda_proletario,
+        fundo_greve=fundo_greve,
+        fundo_meta=FUNDO_GREVE_META,
+        fundo_pct=fundo_pct,
+        ranking=ranking,
+        vencedores=vencedores,
+        quiz_recentes=quiz_recentes,
+        eventos_casa=EVENTOS_CASA
     )
 
 
@@ -973,14 +1358,134 @@ def admin_config_passou_inicio():
     return redirect(url_for('admin_dashboard'))
 
 
+@app.route('/admin/config/renda', methods=['POST'])
+@requer_admin
+def admin_config_renda():
+    """Ajusta a renda por volta de cada classe."""
+    try:
+        renda_b = float(request.form.get('renda_burgues', '0') or 0)
+        renda_p = float(request.form.get('renda_proletario', '0') or 0)
+        if renda_b < 0 or renda_p < 0:
+            raise ValueError
+    except ValueError:
+        flash('Valores de renda invalidos', 'erro')
+        return redirect(url_for('admin_dashboard'))
+
+    db = get_db()
+    salvar_config(db, 'renda_burgues', renda_b)
+    salvar_config(db, 'renda_proletario', renda_p)
+    db.commit()
+    db.close()
+    flash(f'Renda por volta: Burgues R$ {renda_b:.0f} / Proletario R$ {renda_p:.0f}', 'sucesso')
+    return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/fundo/adicionar', methods=['POST'])
+@requer_admin
+def admin_fundo_adicionar():
+    """Adiciona ao Fundo de Greve, opcionalmente debitando um jogador."""
+    try:
+        valor = float(request.form.get('valor', '0') or 0)
+        if valor <= 0:
+            raise ValueError
+    except ValueError:
+        flash('Valor invalido para o fundo', 'erro')
+        return redirect(url_for('admin_dashboard'))
+
+    db = get_db()
+    contribuinte_id = request.form.get('usuario_id', type=int)
+
+    if contribuinte_id:
+        jogador = obter_jogador(db, contribuinte_id)
+        if not jogador:
+            db.close()
+            flash('Contribuinte invalido', 'erro')
+            return redirect(url_for('admin_dashboard'))
+        banco_id = obter_banco_id(db)
+        efetivo = aplicar_montante(
+            db, contribuinte_id, -valor, banco_id, 'Contribuicao ao Fundo de Greve'
+        )
+        valor = -efetivo  # o que realmente saiu do jogador
+
+    fundo = obter_fundo_greve(db) + valor
+    salvar_config(db, 'fundo_greve', fundo)
+    db.commit()
+    db.close()
+
+    if fundo >= FUNDO_GREVE_META:
+        flash(f'Fundo de Greve completou R$ {fundo:.0f}. REVOLUCAO: os proletarios vencem!', 'sucesso')
+    else:
+        flash(f'Fundo de Greve agora em R$ {fundo:.0f} de R$ {FUNDO_GREVE_META:.0f}', 'sucesso')
+    return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/fundo/zerar', methods=['POST'])
+@requer_admin
+def admin_fundo_zerar():
+    """Zera o Fundo de Greve."""
+    db = get_db()
+    salvar_config(db, 'fundo_greve', 0.0)
+    db.commit()
+    db.close()
+    flash('Fundo de Greve zerado', 'info')
+    return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/evento/aplicar', methods=['POST'])
+@requer_admin
+def admin_aplicar_evento():
+    """Aplica o dinheiro de uma casa de ganho/perda/fianca, ramificando por classe."""
+    chave = request.form.get('chave', '')
+    evento = EVENTOS_CASA_MAP.get(chave)
+    if not evento:
+        flash('Casa invalida', 'erro')
+        return redirect(url_for('admin_dashboard'))
+
+    db = get_db()
+    jogador = obter_jogador(db, request.form.get('usuario_id', type=int))
+    if not jogador:
+        db.close()
+        flash('Selecione um camarada valido', 'erro')
+        return redirect(url_for('admin_dashboard'))
+
+    _, nome, valor_burg, valor_prol = evento
+    montante = valor_burg if jogador['classe'] == 'burgues' else valor_prol
+
+    try:
+        banco_id = obter_banco_id(db)
+        efetivo = aplicar_montante(db, jogador['id'], montante, banco_id, f'Casa: {nome}', 'Falencia (casa)')
+        db.commit()
+        if efetivo >= 0:
+            flash(f'{jogador["nome"]} recebeu R$ {efetivo:.2f} em "{nome}"', 'sucesso')
+        else:
+            flash(f'{jogador["nome"]} pagou R$ {abs(efetivo):.2f} em "{nome}"', 'sucesso')
+    except Exception as e:
+        db.rollback()
+        flash(f'Erro ao aplicar evento: {str(e)}', 'erro')
+    finally:
+        db.close()
+    return redirect(url_for('admin_dashboard'))
+
+
 @app.route('/admin/jogadores/novo', methods=['POST'])
 @requer_admin
 def admin_criar_jogador():
-    """Cria jogador pelo painel do banco, opcionalmente com saldo inicial."""
+    """Cria jogador pelo painel do banco, com classe e saldo inicial."""
     nome = normalizar_nome(request.form.get('nome', ''))
+    classe = request.form.get('classe', '') or None
+    if classe not in CLASSES_JOGADOR:
+        classe = None
 
+    saldo_bruto = request.form.get('saldo_inicial', '').strip()
     try:
-        saldo_inicial = float(request.form.get('saldo_inicial', '0') or 0)
+        if saldo_bruto == '':
+            # Sem valor informado: sugere pela classe.
+            saldo_inicial = {
+                'burgues': SALDO_INICIAL_BURGUES,
+                'proletario': SALDO_INICIAL_PROLETARIO,
+            }.get(classe, 0.0)
+        else:
+            saldo_inicial = float(saldo_bruto)
         if saldo_inicial < 0:
             raise ValueError
     except ValueError:
@@ -1007,6 +1512,7 @@ def admin_criar_jogador():
     try:
         banco_id = obter_banco_id(db)
         jogador_id = inserir_usuario(db, nome, saldo_inicial)
+        db.execute('UPDATE usuarios SET classe = ? WHERE id = ?', (classe, jogador_id))
 
         if saldo_inicial > 0:
             registrar_movimento(
@@ -1018,7 +1524,8 @@ def admin_criar_jogador():
             )
 
         db.commit()
-        flash(f'Jogador {nome} criado com sucesso', 'sucesso')
+        rotulo = ROTULO_CLASSE_JOGADOR.get(classe, 'Sem classe')
+        flash(f'Jogador {nome} ({rotulo}) criado com saldo R$ {saldo_inicial:.2f}', 'sucesso')
     except sqlite3.IntegrityError:
         db.rollback()
         flash('Ja existe um jogador com esse nome', 'erro')
@@ -1040,18 +1547,25 @@ def admin_passou_inicio(usuario_id):
         flash('Jogador nao encontrado', 'erro')
         return redirect(url_for('admin_dashboard'))
 
-    valor = obter_config_float(db, 'valor_passou_inicio', VALOR_PASSOU_INICIO_PADRAO)
+    # Renda "da roda" conforme a classe do jogador (fallback: valor_passou_inicio).
+    if jogador['classe'] == 'burgues':
+        valor = obter_config_float(db, 'renda_burgues', RENDA_BURGUES_PADRAO)
+    elif jogador['classe'] == 'proletario':
+        valor = obter_config_float(db, 'renda_proletario', RENDA_PROLETARIO_PADRAO)
+    else:
+        valor = obter_config_float(db, 'valor_passou_inicio', VALOR_PASSOU_INICIO_PADRAO)
+
     if valor <= 0:
         db.close()
-        flash('Defina um valor maior que zero para passar pelo inicio', 'erro')
+        flash('Defina um valor maior que zero para a renda por volta', 'erro')
         return redirect(url_for('admin_dashboard'))
 
     try:
         banco_id = obter_banco_id(db)
         db.execute('UPDATE usuarios SET saldo = saldo + ? WHERE id = ?', (valor, usuario_id))
-        registrar_movimento(db, banco_id, usuario_id, valor, 'Passou pelo inicio')
+        registrar_movimento(db, banco_id, usuario_id, valor, 'Renda por volta (passou pelo inicio)')
         db.commit()
-        flash(f'{jogador["nome"]} recebeu R$ {valor:.2f} por passar pelo inicio', 'sucesso')
+        flash(f'{jogador["nome"]} recebeu R$ {valor:.2f} de renda por volta', 'sucesso')
     except Exception as e:
         db.rollback()
         flash(f'Erro ao pagar passagem pelo inicio: {str(e)}', 'erro')
@@ -1201,12 +1715,17 @@ def admin_resetar():
 
     db = get_db()
     db.execute('DELETE FROM transacoes')
+    db.execute('DELETE FROM cartas_tiradas')
+    db.execute('DELETE FROM quiz_rodadas')
     db.execute('DELETE FROM usuarios WHERE nome != ?', (BANCO_NOME,))
     # Devolve todas as propriedades ao banco (evita donos orfaos apos o reset)
     db.execute('''
         UPDATE propriedades
         SET dono_id = NULL, num_casas = 0, tem_hotel = 0, hipotecada = 0
     ''')
+    # Reembaralha as cartas e zera o fundo de greve.
+    db.execute('UPDATE baralho SET usada = 0')
+    salvar_config(db, 'fundo_greve', 0.0)
     garantir_usuario_banco(db)
     db.commit()
     db.close()
@@ -1508,17 +2027,26 @@ def admin_cobrar_aluguel(propriedade_id):
 @app.route('/admin/cartas/tirar', methods=['POST'])
 @requer_admin
 def admin_tirar_carta():
-    """Sorteia uma carta do baralho escolhido para o jogador selecionado."""
-    classe = request.form.get('classe', '')
-    if classe not in CLASSES_VALIDAS:
-        flash('Baralho invalido', 'erro')
-        return redirect(url_for('admin_dashboard'))
+    """Sorteia uma carta do baralho para o jogador. Padrao: baralho da classe do jogador."""
+    classe = request.form.get('classe', 'auto')
 
     db = get_db()
     jogador = obter_jogador(db, request.form.get('usuario_id', type=int))
     if not jogador:
         db.close()
         flash('Selecione um camarada valido', 'erro')
+        return redirect(url_for('admin_dashboard'))
+
+    if classe == 'auto' or classe == '':
+        classe = DECK_POR_CLASSE.get(jogador['classe'])
+        if not classe:
+            db.close()
+            flash('Esse jogador nao tem classe. Escolha o baralho manualmente ou defina a classe.', 'erro')
+            return redirect(url_for('admin_dashboard'))
+
+    if classe not in CLASSES_VALIDAS:
+        db.close()
+        flash('Baralho invalido', 'erro')
         return redirect(url_for('admin_dashboard'))
 
     carta = tirar_carta(db, classe)
@@ -1587,6 +2115,104 @@ def admin_aplicar_carta(tirada_id):
     return redirect(url_for('admin_dashboard'))
 
 
+# ============== ROTAS DE QUIZ ==============
+
+@app.route('/admin/quiz/enviar', methods=['POST'])
+@requer_admin
+def admin_enviar_quiz():
+    """Envia uma pergunta do quiz para um jogador responder na propria tela."""
+    db = get_db()
+    jogador = obter_jogador(db, request.form.get('usuario_id', type=int))
+    if not jogador:
+        db.close()
+        flash('Selecione um camarada valido', 'erro')
+        return redirect(url_for('admin_dashboard'))
+
+    pendente = quiz_pendente_do_jogador(db, jogador['id'])
+    if pendente:
+        db.close()
+        flash(f'{jogador["nome"]} ja tem um quiz aguardando resposta', 'info')
+        return redirect(url_for('admin_dashboard'))
+
+    pergunta = db.execute(
+        'SELECT id FROM quiz_perguntas ORDER BY RANDOM() LIMIT 1'
+    ).fetchone()
+    if not pergunta:
+        db.close()
+        flash('Nenhuma pergunta de quiz cadastrada', 'erro')
+        return redirect(url_for('admin_dashboard'))
+
+    db.execute(
+        'INSERT INTO quiz_rodadas (usuario_id, pergunta_id) VALUES (?, ?)',
+        (jogador['id'], pergunta['id'])
+    )
+    db.commit()
+    db.close()
+    flash(f'Quiz enviado para {jogador["nome"]}. Aguardando resposta na tela do jogador.', 'sucesso')
+    return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/quiz/<int:rodada_id>/responder', methods=['POST'])
+@requer_usuario
+def quiz_responder(rodada_id):
+    """O jogador responde o quiz (a/b/c/d); o app corrige e aplica buff/debuff."""
+    escolha = (request.form.get('escolha', '') or '').strip().lower()
+    if escolha not in ('a', 'b', 'c', 'd'):
+        flash('Escolha uma alternativa valida', 'erro')
+        return redirect(url_for('dashboard'))
+
+    db = get_db()
+    rodada = db.execute('''
+        SELECT r.id, r.usuario_id, r.respondida, q.correta
+        FROM quiz_rodadas r
+        JOIN quiz_perguntas q ON r.pergunta_id = q.id
+        WHERE r.id = ?
+    ''', (rodada_id,)).fetchone()
+
+    if not rodada or rodada['usuario_id'] != session['usuario_id']:
+        db.close()
+        flash('Quiz nao encontrado', 'erro')
+        return redirect(url_for('dashboard'))
+
+    if rodada['respondida']:
+        db.close()
+        flash('Voce ja respondeu esse quiz', 'info')
+        return redirect(url_for('dashboard'))
+
+    acertou = (escolha == rodada['correta'])
+    res_tipo, res_valor, res_texto = sortear_resultado_quiz(acertou)
+
+    try:
+        banco_id = obter_banco_id(db)
+        valor_aplicado = None
+        if res_tipo == 'dinheiro':
+            valor_aplicado = aplicar_montante(
+                db, session['usuario_id'], res_valor, banco_id, f'Quiz: {res_texto}', 'Falencia (quiz)'
+            )
+        elif res_tipo == 'protecao':
+            conceder_protecao(db, session['usuario_id'])
+
+        db.execute('''
+            UPDATE quiz_rodadas
+            SET respondida = 1, escolha = ?, acertou = ?, res_tipo = ?, res_valor = ?,
+                res_texto = ?, respondida_em = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ''', (escolha, 1 if acertou else 0, res_tipo, valor_aplicado, res_texto, rodada_id))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        db.close()
+        flash(f'Erro ao aplicar o resultado do quiz: {str(e)}', 'erro')
+        return redirect(url_for('dashboard'))
+
+    db.close()
+    if acertou:
+        flash(f'Resposta correta! Resultado: {res_texto}', 'sucesso')
+    else:
+        flash(f'Resposta errada. Resultado: {res_texto}', 'erro')
+    return redirect(url_for('dashboard'))
+
+
 # ============== ROTAS DE API (JSON) ==============
 
 @app.route('/api/usuarios')
@@ -1646,6 +2272,35 @@ def api_minhas_cartas():
             }
             for p in protecoes
         ],
+    })
+
+
+@app.route('/api/meu-quiz')
+@requer_usuario
+def api_meu_quiz():
+    """Quiz pendente (para responder) e o ultimo resultado do jogador logado."""
+    db = get_db()
+    pendente = quiz_pendente_do_jogador(db, session['usuario_id'])
+    ultimo = ultimo_quiz_resultado(db, session['usuario_id'])
+    db.close()
+
+    return jsonify({
+        'pendente': None if not pendente else {
+            'id': pendente['id'],
+            'numero': pendente['numero'],
+            'texto': pendente['texto'],
+            'op_a': pendente['op_a'],
+            'op_b': pendente['op_b'],
+            'op_c': pendente['op_c'],
+            'op_d': pendente['op_d'],
+        },
+        'ultimo': None if not ultimo else {
+            'id': ultimo['id'],
+            'acertou': bool(ultimo['acertou']),
+            'res_texto': ultimo['res_texto'],
+            'escolha': ultimo['escolha'],
+            'correta': ultimo['correta'],
+        },
     })
 
 
